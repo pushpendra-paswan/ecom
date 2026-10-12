@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register - Ecommerce</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="form-card">
+    <h1>Create an account</h1>
+    <form id="register-form">
+      <label for="full-name">Full name</label>
+      <input type="text" id="full-name" required maxlength="255">
+
+      <label for="email">Email</label>
+      <input type="email" id="email" required>
+
+      <label for="password">Password (8 to 72 characters)</label>
+      <input type="password" id="password" required minlength="8" maxlength="72">
+
+      <label for="role">I want to</label>
+      <select id="role">
+        <option value="customer">Buy things (Customer)</option>
+        <option value="seller">Sell things (Seller)</option>
+      </select>
+
+      <p id="error-message" class="error-message" hidden></p>
+      <button type="submit" id="submit-button">Register</button>
+    </form>
+    <p>Already have an account? <a href="/login.html">Log in</a></p>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/register.js"></script>
+</body>
+</html>

@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     TEST_DATABASE_URL: str
 
-    # Auth (empty until M2)
+    # Auth (tokens are signed with HS256)
     JWT_SECRET: str = ""
+    JWT_EXPIRE_MINUTES: int = 60
 
     # Stripe (empty until M7)
     STRIPE_SECRET_KEY: str = ""
@@ -23,3 +24,7 @@ class Settings(BaseSettings):
 
 # One settings object shared by the whole app
 settings = Settings()
+
+# Refuse to start without a JWT secret, because an empty secret would let anyone forge tokens
+if settings.JWT_SECRET == "":
+    raise RuntimeError("JWT_SECRET is empty. Generate one with: openssl rand -hex 32")

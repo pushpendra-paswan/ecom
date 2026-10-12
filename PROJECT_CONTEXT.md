@@ -12,8 +12,9 @@ An Amazon-style e-commerce web app, built for learning the full web flow from br
 - Frontend: plain HTML, CSS, JavaScript (served by FastAPI)
 - Testing: pytest and httpx (via FastAPI `TestClient`) against a real Postgres test database
 - Dev environment: Docker Compose (`app` and `db`)
-- Password hashing: `bcrypt` (used directly; installed in M1 for the seed script)
-- Not installed yet (later milestones): JWT library, `stripe`
+- Password hashing: `bcrypt` (used directly, no wrapper)
+- Tokens: `PyJWT` (HS256). Email validation: `email-validator` (used by Pydantic `EmailStr`)
+- Not installed yet (later milestones): `stripe`
 
 Pinned versions are in `requirements.txt`.
 
@@ -26,17 +27,18 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── db.py              # engine, SessionLocal, Base, get_db
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
-│   ├── schemas/           # (only __init__.py for now)
-│   ├── routers/           # (only __init__.py for now)
-│   ├── services/          # (only __init__.py for now)
-│   ├── repositories/      # (only __init__.py for now)
+│   ├── schemas/           # user.py, address.py
+│   ├── routers/           # auth.py, users.py, admin.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py
+│   ├── repositories/      # user_repository.py, address_repository.py
 │   └── core/
-│       └── config.py      # Settings class (reads env variables)
+│       ├── config.py      # Settings class (reads env variables)
+│       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
 ├── alembic/               # env.py, script.py.mako, versions/ (one migration: initial schema)
 ├── alembic.ini
-├── static/                # css/style.css, js/, images/
-├── frontend/              # index.html (placeholder)
-├── tests/                 # conftest.py, test_health.py, test_schema.py
+├── static/                # css/style.css, js/ (api.js, login.js, register.js, index.js), images/
+├── frontend/              # index.html (temporary user bar), login.html, register.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -52,7 +54,7 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 docker compose up --build
 ```
 
-- App: http://localhost:8000/ (placeholder page)
+- App: http://localhost:8000/ (home page with a temporary Login / Register / Logout bar)
 - Swagger: http://localhost:8000/docs
 - Health: http://localhost:8000/health
 - CSS: http://localhost:8000/static/css/style.css
@@ -70,16 +72,21 @@ Tests use `TEST_DATABASE_URL` (database `ecommerce_test`). `tests/conftest.py` c
 
 Two fixtures:
 - `db_session`: a session inside an outer transaction that is rolled back after every test (savepoint mode, so a failed statement inside `pytest.raises(IntegrityError)` does not break the test). Use this for model and repository/service tests.
-- `client`: a `TestClient` whose `get_db` is overridden to use the test database. It commits for real, so data written through the client is NOT rolled back (M2 must clean up, e.g. truncate tables after each test).
+- `client`: a `TestClient` whose `get_db` is overridden to use the test database. It commits for real, so after every test it runs `TRUNCATE users, categories RESTART IDENTITY CASCADE` (this empties every table). The test database is never seeded.
+
+Two helper fixtures (M2) in `conftest.py`:
+- `create_user(email, role="customer", is_active=True, password="Password@123")`: inserts a user directly into the test database (fast bcrypt rounds) and returns the user id.
+- `auth_headers(email, password="Password@123")`: logs in through `/auth/login` and returns `{"Authorization": "Bearer ..."}`.
 
 ## Completed milestones
 
 - **M0: Project setup.** Docker Compose (app + Postgres 16 with healthcheck and named volume), FastAPI skeleton with `/health`, static and frontend mounts, Alembic configured (no migrations), pytest against a separate test database.
 - **M1: Database schema, models and seed data.** All 9 tables as SQLAlchemy 2.x models, one Alembic migration (`6fc51572ed70`), seed script, schema tests. No endpoints.
+- **M2: Authentication, roles and user accounts.** Register, login (JWT), profile, addresses, admin user list, role dependencies, login/register pages, shared `api.js`, 32 tests passing. No schema change (no new migration).
 
 ## Pending milestones
 
-M2 Authentication and roles · M3 Catalog API · M4 Storefront frontend · M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M3 Catalog API · M4 Storefront frontend · M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -164,13 +171,72 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## Notes for the next milestone (M2)
+## API endpoints (as of M2)
 
-- Add the JWT library (e.g. PyJWT) to `requirements.txt`; `bcrypt` is already installed. Set `JWT_SECRET` in `.env` (it defaults to empty).
-- Seed users already have bcrypt hashes made with `bcrypt.hashpw(password.encode(), bcrypt.gensalt())` (decoded to str), so login should check with `bcrypt.checkpw(password.encode(), password_hash.encode())`.
-- `User.is_active` exists: login should reject inactive users.
-- Registration should only create `customer` users; sellers and admins come from the seed (or an admin later). The DB already rejects duplicate emails (`IntegrityError`; turn it into a 409).
-- Models have no `back_populates` and no relationship to `User`; query by `user_id` in repositories.
-- API tests that go through the `client` fixture commit for real into `ecommerce_test` and the schema is only rebuilt at the start of the next test session. Clean up between tests (for example truncate the tables in a fixture) or make `client` use a rolled back `db_session`.
-- Creating files inside the container with Alembic makes them root-owned; use `docker compose exec --user "$(id -u):$(id -g)" app alembic revision ...`.
-- After changing `requirements.txt`, rebuild with `docker compose up -d --build` (the project folder is mounted, but installed packages live in the image).
+| Method and path | Access | Notes |
+|---|---|---|
+| GET `/health` | public | Database check |
+| POST `/auth/register` | public | Returns 201 and the user. Role `customer` (default) or `seller`; `admin` gives 422 |
+| POST `/auth/login` | public | JSON body `{email, password}`, returns `{access_token, token_type}` |
+| GET `/users/me` | any logged-in user | |
+| PATCH `/users/me` | any logged-in user | Changes only `full_name` |
+| GET `/users/me/addresses` | any logged-in user | Own addresses only |
+| POST `/users/me/addresses` | any logged-in user | Returns 201. First address becomes default |
+| PUT `/users/me/addresses/{address_id}` | any logged-in user | Full replace. Not your address: 404 |
+| DELETE `/users/me/addresses/{address_id}` | any logged-in user | Returns 204. Not your address: 404 |
+| GET `/admin/users` | admin only | Paginated (see below) |
+
+The pages `/`, `/login.html` and `/register.html` and everything under `/static` are public files.
+
+## Auth flow (M2)
+
+- **Register** creates a `customer` or `seller` (never `admin`; the seed creates admins). Email is trimmed and lowercased, password is 8 to 72 characters (also max 72 bytes), stored only as a bcrypt hash. Duplicate email: 409.
+- **Login** looks up the lowercased email, checks the bcrypt password first, then `is_active`. Unknown email and wrong password give the same 401 `"Incorrect email or password"` (an unknown email still runs one bcrypt hash so timing is similar). A correct password on a disabled account gives 403 `"Account is disabled"`.
+- **Token:** PyJWT, HS256, signed with `JWT_SECRET`. Payload is only `sub` (user id as a string) and `exp` (`JWT_EXPIRE_MINUTES`, default 60). The role is NOT in the token.
+- **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and goes to `/login.html`.
+- **Every request** to a protected endpoint goes through `get_current_user` (in `app/core/dependencies.py`): it reads the Bearer header (`HTTPBearer(auto_error=False)`), decodes the token, loads the user from the database and returns the user. The role and `is_active` always come from the database.
+- **401** (`"Not authenticated"`, with `WWW-Authenticate: Bearer`): missing header, bad signature, expired token, no `sub`/`exp`, user not found, or user disabled.
+- **403:** logged in, but the role is wrong. `require_customer`, `require_seller` and `require_admin` check that the role is exactly that role (an admin does NOT pass `require_customer` or `require_seller`).
+- **404:** a resource that exists but belongs to someone else (for example another user's address) looks the same as one that does not exist.
+- **409:** duplicate email.
+
+## Pagination format (M2)
+
+List endpoints take `page` (default 1, minimum 1) and `page_size` (default 20, between 1 and 100); values outside the range give 422. The response is:
+
+```json
+{"items": [...], "total": 42, "page": 1, "page_size": 20}
+```
+
+## Settings (M2)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JWT_SECRET` | none, **required** | Signing key. Generate with `openssl rand -hex 32`. The app refuses to start if it is empty |
+| `JWT_EXPIRE_MINUTES` | 60 | Token lifetime |
+
+The algorithm (HS256) is written inline where the token is created and decoded. The local `.env` has a generated dev secret; `.env.example` has it empty with a note.
+
+## Key design decisions (M2)
+
+- **Services raise `HTTPException` directly** (404, 409, 401, 403, 422). CLAUDE.md did not say how services report errors; this is the simplest option and avoids a separate exception layer.
+- **No `core/security.py`:** bcrypt hashing/checking and JWT encode/decode are written inline in `auth_service.py` and `dependencies.py`.
+- **`get_current_user` calls `user_repository.get_user_by_id`** directly (a dependency may use the repository). It shares the request's session with the service, so services can modify `current_user` and commit it.
+- **Pydantic strips spaces** (`str_strip_whitespace`) on register, profile and address bodies; the service lowercases the email. Login takes `email` as a plain string, so a badly formatted email gives 401, not 422.
+- **Passwords:** the 72-byte limit is checked in bytes in the service (a 72-character password with multi-byte characters is rejected with 422 on register, and with 401 on login), because bcrypt 5 raises an error above 72 bytes.
+- **Addresses:** one shared `AddressRequest` for POST and PUT (PUT replaces all fields). A user may end up with no default address (deleting the default, or a PUT with `is_default: false` on it); the app never promotes another one. Nothing in the database enforces "one default per user"; the service does it.
+- **Unknown JSON fields are ignored** (for example `role` in a PATCH body), so PATCH `/users/me` can only change `full_name`.
+- **An empty `JWT_SECRET` stops the app at startup** (a check at the bottom of `config.py`), because an empty key would allow forged tokens.
+- **`apiRequest`:** the method defaults to `GET` if omitted, and a `204` response returns `null`.
+- `static/js/index.js` was added for the temporary home page bar (the milestone listed only login.js and register.js). Both it and the bar in `index.html` go away in M4 when the real navbar arrives.
+- `static/js/.gitkeep` was deleted because the folder now has files.
+
+## Notes for the next milestone (M3)
+
+- **Seller endpoints must allow a seller or an admin.** `require_seller` accepts only sellers, so do NOT use it for product management. Use `get_current_user` and check `role in ("seller", "admin")` inline in the service (raise 403 otherwise).
+- **Ownership:** a seller may only change their own products (`product.seller_id == current_user.id`); an admin may change any. When a seller touches someone else's product, return 404 (not 403), like addresses.
+- Public catalog endpoints (list and read products, categories) need no token. Hide inactive products from the public lists.
+- Paginated lists must use the format `{"items", "total", "page", "page_size"}` with `page >= 1` and `1 <= page_size <= 100` (default 20), as in `/admin/users`. See `user_service.list_users` and `user_repository.list_users` / `count_users` for the pattern.
+- Same file pattern as M2: router (HTTP only) → service (transaction, rules, `HTTPException`) → repository (queries, no commit). Use `from app.repositories import xxx_repository` and call `xxx_repository.function(db, ...)`.
+- Tests: use the `client`, `create_user` and `auth_headers` fixtures. Insert categories/products in each test (the test database is empty).
+- After changing `requirements.txt`, rebuild with `docker compose up -d --build`. Creating files inside the container with Alembic makes them root-owned; use `docker compose exec --user "$(id -u):$(id -g)" app alembic revision ...`.

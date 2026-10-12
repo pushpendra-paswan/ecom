@@ -1,15 +1,17 @@
+import bcrypt
 import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.db import get_db
 from app.main import app
+from app.models.user import User
 
 
 @pytest.fixture(scope="session")
@@ -93,3 +95,40 @@ def client(test_engine):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+    # The client really commits, so empty the tables after the test
+    # (CASCADE also empties every table that points to these two)
+    with test_engine.begin() as connection:
+        connection.execute(text("TRUNCATE users, categories RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture
+def create_user(test_engine):
+    # Returns a function that inserts a user straight into the test database
+    def create(email, role="customer", is_active=True, password="Password@123"):
+        # Low bcrypt rounds make the tests faster
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=4)).decode()
+        with Session(test_engine) as session:
+            user = User(
+                email=email,
+                password_hash=password_hash,
+                full_name="Test " + role,
+                role=role,
+                is_active=is_active,
+            )
+            session.add(user)
+            session.commit()
+            return user.id
+
+    return create
+
+
+@pytest.fixture
+def auth_headers(client):
+    # Returns a function that logs in through the API and gives the Authorization header
+    def headers_for(email, password="Password@123"):
+        response = client.post("/auth/login", json={"email": email, "password": password})
+        token = response.json()["access_token"]
+        return {"Authorization": "Bearer " + token}
+
+    return headers_for

@@ -3,3 +3,62 @@ body {
   margin: 2rem;
   color: #222;
 }
+
+/* Temporary bar at the top of the home page (replaced by the navbar in M4) */
+.user-bar {
+  margin-bottom: 1.5rem;
+}
+
+.user-bar a {
+  margin-right: 1rem;
+}
+
+/* Login and register forms */
+.form-card {
+  max-width: 24rem;
+  margin: 3rem auto;
+  padding: 1.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.form-card label {
+  display: block;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+  font-weight: bold;
+}
+
+.form-card input,
+.form-card select {
+  width: 100%;
+  padding: 0.5rem;
+  box-sizing: border-box;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.form-card button {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  margin: 1rem 0 0;
+  padding: 0.5rem;
+  background: #fdecea;
+  color: #b71c1c;
+  border-radius: 4px;
+}
