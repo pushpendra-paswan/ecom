@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.catalog import Product
@@ -99,3 +99,10 @@ def lock_products(db: Session, product_ids: list[int]):
         .execution_options(populate_existing=True)
     )
     return list(db.execute(query).scalars().all())
+
+
+def increase_stock(db: Session, product_id: int, quantity: int):
+    # One atomic increment (UPDATE products SET stock = stock + quantity WHERE id = ...).
+    # The database adds the numbers, so the app never reads the old stock first.
+    query = update(Product).where(Product.id == product_id).values(stock=Product.stock + quantity)
+    db.execute(query)

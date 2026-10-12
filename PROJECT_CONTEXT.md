@@ -14,7 +14,7 @@ An Amazon-style e-commerce web app, built for learning the full web flow from br
 - Dev environment: Docker Compose (`app` and `db`)
 - Password hashing: `bcrypt` (used directly, no wrapper)
 - Tokens: `PyJWT` (HS256). Email validation: `email-validator` (used by Pydantic `EmailStr`)
-- Payments: `stripe` 16.0.0 (Python SDK, test mode only; added in M7)
+- Payments: `stripe` 16.0.0 (Python SDK, test mode only; added in M7, webhooks in M8)
 
 Pinned versions are in `requirements.txt`.
 
@@ -28,8 +28,8 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
 │   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py, order.py
-│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py, orders.py
-│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py
+│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py, orders.py, webhooks.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py, webhook_service.py
 │   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py, order_repository.py
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
@@ -38,7 +38,7 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
 ├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_frontend_files.py
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_webhooks.py, test_webhooks_concurrency.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -79,6 +79,7 @@ Helper fixtures in `conftest.py` (M2, M3):
 - `auth_headers(email, password="Password@123")`: logs in through `/auth/login` and returns `{"Authorization": "Bearer ..."}`.
 - `create_category(name, slug=None)` (M3): inserts a category directly and returns its id. The slug defaults to the lowercased name with spaces turned into hyphens.
 - `committed_data` (M7, used only by `tests/test_checkout_concurrency.py`): methods `customer(email)` (a customer with one address, returns `(user_id, address_id)`), `products(count, stock, price=10000)` (a seller, a category and several products, returns the ids) and `put_in_cart(user_id, product_id, quantity)`. Everything is committed with its own sessions, so several threads can see it. The fixture ends with `TRUNCATE users, categories RESTART IDENTITY CASCADE`, which runs even when the test fails.
+- `post_webhook` (M8): sets `STRIPE_WEBHOOK_SECRET` to a test value and returns `post(event, timestamp=None, secret=<test secret>, signed_body=None)`. It turns the event dictionary into JSON bytes (or sends bytes as they are), signs them as Stripe does (`Stripe-Signature: t=<timestamp>,v1=<HMAC-SHA256 of "<timestamp>.<payload>">`) and posts the same bytes to `/webhooks/stripe`. `timestamp` and `secret` make a bad signature, `signed_body` signs a different body (tampered body). It uses the `client` fixture, so it also works from several threads.
 - `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None, description="A test product")` (M3, `description` added in M5): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
 ## Completed milestones
@@ -91,10 +92,11 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M5: Search, filter, sort and indexes.** `GET /products` takes `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`, `page_size`. Postgres full-text search (generated `search_vector` column + GIN index), one extra partial index for the newest-first listing, the products page with a filter sidebar, a navbar search box, before/after measurements (see "Search (M5)"). One migration (`099593dc45a9`). 91 tests passing (34 new in `tests/test_search.py`).
 - **M6: Cart.** Customer-only cart API (`/cart`, `/cart/count`, `/cart/items`), atomic upserts, per-line problem reporting, cart page, navbar Cart link with badge, Add to Cart on the product page, `?next=` login redirect. No schema change (no new migration; only the `CartItem.product` relationship was added). 109 tests passing (18 new in `tests/test_cart.py`).
 - **M7: Checkout and orders.** `POST /orders/checkout` (two stages: one locked database transaction, then the Stripe Checkout Session), order history (`GET /orders`, `GET /orders/{id}`), checkout, addresses, orders, order detail, success and cancelled pages, navbar links "My Orders" and "Addresses", "Proceed to checkout" on the cart page. `stripe==16.0.0` added. No schema change (no new migration). 124 tests passing (12 new in `tests/test_checkout.py`, 3 in `tests/test_checkout_concurrency.py`, plus the frontend file test now covers the new pages).
+- **M8: Stripe webhooks.** `POST /webhooks/stripe` (public, secured by the Stripe signature): `checkout.session.completed` marks the order paid, `checkout.session.expired` cancels it and gives the stock back, duplicates and retries are harmless, a late payment for a cancelled order is refunded. One service function, three repository functions for orders and one for products. No schema change (no new migration). 155 tests passing (31 new: 29 in `tests/test_webhooks.py`, 2 in `tests/test_webhooks_concurrency.py`; see "Webhooks (M8)").
 
 ## Pending milestones
 
-M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -179,7 +181,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M7)
+## API endpoints (as of M8)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -212,6 +214,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | POST `/orders/checkout` | customer only | Returns 201 `{order_id, checkout_url, total_amount}`. Body `{address_id}` only. See "Checkout and orders (M7)" |
 | GET `/orders` | customer only | Paginated, the caller's orders, newest first (`created_at DESC, id DESC`). Each item: `id, status, total_amount, created_at, item_count, items[{product_id, product_name, unit_price, quantity}]` |
 | GET `/orders/{order_id}` | customer only | `id, status, total_amount, created_at, shipping_address{...}, items[{..., line_total}], payment{status, amount, currency}`. Someone else's or a missing order: 404 `"Order not found"`. A non-numeric id: 422 |
+| POST `/webhooks/stripe` | public, **Stripe signature required** | Returns 200 `{"received": true}`. 400 bad signature or body, 503 secret not configured, 500 retryable failure. See "Webhooks (M8)" |
 
 All cart and order endpoints: no token gives 401, a seller or admin gives 403 (`require_customer`).
 
@@ -244,7 +247,7 @@ List endpoints take `page` (default 1, minimum 1) and `page_size` (default 20, b
 | `JWT_SECRET` | none, **required** | Signing key. Generate with `openssl rand -hex 32`. The app refuses to start if it is empty |
 | `JWT_EXPIRE_MINUTES` | 60 | Token lifetime |
 
-Stripe settings (read in `app/core/config.py`, used since M7): `STRIPE_SECRET_KEY` (must start with `sk_test_`; empty gives 503 "Payments are not configured" and any other prefix gives 503 "Only Stripe test keys are allowed", both before any database work), `STRIPE_WEBHOOK_SECRET` (used in M8), `STRIPE_CURRENCY` (default `inr`), `FRONTEND_BASE_URL` (default `http://localhost:8000`, used for the Stripe success and cancel URLs).
+Stripe settings (read in `app/core/config.py`, used since M7): `STRIPE_SECRET_KEY` (must start with `sk_test_`; empty gives 503 "Payments are not configured" and any other prefix gives 503 "Only Stripe test keys are allowed", both before any database work), `STRIPE_WEBHOOK_SECRET` (used since M8; empty makes the webhook answer 503 "Webhooks are not configured"), `STRIPE_CURRENCY` (default `inr`), `FRONTEND_BASE_URL` (default `http://localhost:8000`, used for the Stripe success and cancel URLs).
 
 The algorithm (HS256) is written inline where the token is created and decoded. The local `.env` has a generated dev secret; `.env.example` has it empty with a note.
 
@@ -611,30 +614,20 @@ On a Stripe failure: `orders.status = cancelled`, `payments.status = failed`, `s
 
 Stripe ids (`stripe_checkout_session_id`, `stripe_payment_intent_id`) are never returned by any endpoint.
 
-### Known gaps until M8 and M9
+### Known gaps until M9
 
-- Orders stay `pending_payment` after the customer pays, until M8 (the success page then ends with "We are still confirming your payment").
-- Unpaid orders keep their stock reserved until M8 releases it when the Stripe session expires (about 31 minutes after checkout).
 - There is no cancel button until M9.
+- Only card payments are supported (asynchronous payment methods are not handled).
 - The cart is empty after an abandoned payment (the customer has to add the items again; the order is still in My Orders).
-- If the Stripe call times out but Stripe really created the session, the order is cancelled by the failure path while the session can still be paid. M8 should refund or ignore a `checkout.session.completed` event for an order that is not `pending_payment`.
-- If step n (saving the session id) fails after the Stripe session exists, the payment has no session id. M8 must find the payment through `metadata.order_id` as a fallback.
-
-### Notes for M8 (webhooks)
-
-- Find the payment by `stripe_checkout_session_id`; fall back to `metadata.order_id` (stage 2 step n can fail after the Stripe session exists).
-- Only change an order that is still `pending_payment`, so Stripe retries are harmless (idempotent).
-- Store `stripe_payment_intent_id` from the `checkout.session.completed` event.
-- `checkout.session.expired`: cancel the order, restore the stock and mark the payment `failed`, in one transaction. Lock the product rows in ascending id order (and keep "cart row first" if the cart is touched) like checkout does. It does not put items back into the cart.
-- Local testing needs `stripe listen --forward-to localhost:8000/webhooks/stripe` and the `whsec_...` value in `STRIPE_WEBHOOK_SECRET`.
-- Webhook tests send events signed with a test secret and never call the real Stripe API.
-- The success page already polls the order status (15 checks, 2 seconds apart) and only believes the API.
 
 ### Notes for M9 (order lifecycle and dashboards)
 
-- Cancelling a `pending_payment` order restores the stock (same lock order as checkout).
-- Cancelling a `paid` order restores the stock and creates a Stripe refund (the payment intent id is saved by M8).
-- Sellers will need an orders view filtered to their own products (`order_items.product_id` joined to `products.seller_id`).
+- Cancelling a `pending_payment` order must ALSO expire the Stripe session (`stripe.checkout.Session.expire`), otherwise the customer could still pay for a cancelled order. (The late-payment refund of M8 would catch it, but it should not happen.)
+- Cancelling a `paid` order restores the stock and creates a Stripe refund (the payment intent id is saved by M8 in `payments.stripe_payment_intent_id`).
+- Every code path that changes an order must lock the order row first (`order_repository.lock_order`) and re-check its status inside the lock.
+- Stock restores use the same atomic, ascending-product-id increments as M8 (`product_repository.increase_stock`, see `webhook_service.py`).
+- Allowed transitions: `pending_payment -> paid` (the webhook ONLY), `paid -> shipped -> delivered` (seller or admin), and the cancellation rules above. Everything else is rejected.
+- Sellers need an orders view filtered to the orders that contain their own products (`order_items.product_id` joined to `products.seller_id`).
 - The order detail and list pages already show every status label (`pending_payment`, `paid`, `shipped`, `delivered`, `cancelled`).
 
 ### Key design decisions (M7)
@@ -652,6 +645,86 @@ Stripe ids (`stripe_checkout_session_id`, `stripe_payment_intent_id`) are never 
   - The existing `client` fixture commits for real and truncates afterwards (it does not roll back); the new `tests/test_checkout.py` uses it like `test_cart.py` does. Only `committed_data` is new.
 - **Tests:** Stripe is replaced with `unittest.mock.patch("stripe.checkout.Session.create")` and the key setting is set to `sk_test_dummy` with `monkeypatch`. The concurrency tests call `checkout_service.checkout` directly from threads (each with its own session), lined up with a `threading.Barrier(...)`, and fail if a thread is still alive after 15 seconds. They passed 20 runs in a row. As a check, they all fail when the two `FOR UPDATE` locks are removed.
 - **Tested by hand** with headless Chrome (Playwright from a temporary virtual environment outside the project) and a real `sk_test_` key: a seeded customer adds two products, checks out, lands on the real Stripe page; cancelled page, orders list, detail, success page ending with "still confirming" after about 30 seconds; `<script>` and `<img onerror>` text in an address shows as plain text on the addresses, checkout and order pages (no dialog); cart problem state (inactive product) disables the checkout; no-address state with `?next=` returns to the checkout after adding; simulated 502, 409 and a non-Stripe `checkout_url`; 375px and 360px wide pages without horizontal scroll; seller sees no Cart, My Orders or Addresses links. The dev database was restored to the seeded state afterwards.
+
+## Webhooks (M8)
+
+### The endpoint
+
+`POST /webhooks/stripe` (`app/routers/webhooks.py`, prefix `/webhooks`). Public: no login, no `Depends(require_*)`. Its security is the Stripe signature, checked on the **exact raw bytes** of the body with `STRIPE_WEBHOOK_SECRET` (`stripe.Webhook.construct_event`, default tolerance of 5 minutes). There is no Pydantic body model and `request.json()` is never used, because parsing and re-serializing would change the bytes. It is the **only `async def` endpoint** in the project: reading the raw body needs `await request.body()`. The blocking service call runs through `run_in_threadpool`, so database and Stripe calls do not block the event loop. The router returns whatever the service returns: `{"received": true}`.
+
+The service is one function, `webhook_service.handle_stripe_event(db, payload, signature_header)`: plain sequential code with steps a to i. It takes the session from `get_db` like every other service (the milestone listed only `payload` and `signature_header`; the session is needed so the tests' database override works, and so the concurrency tests can pass their own session).
+
+### Events
+
+| Event | What happens |
+|---|---|
+| `checkout.session.completed`, `payment_status = "paid"`, order `pending_payment` | Order `paid`, payment `succeeded`, `stripe_payment_intent_id` saved. Commit, 200 |
+| same, order already `paid` (duplicate) / `shipped` / `delivered` | Nothing changes, 200 |
+| same, order `cancelled` (late payment) | Order stays cancelled. The payment intent is saved and committed, then a refund is created (see below). 200, or 500 if the refund call fails |
+| `checkout.session.completed`, `payment_status` not `"paid"` | Nothing changes, 200 |
+| `checkout.session.completed`, `amount_total` or `currency` (lowercased) different from the payment's | Error is logged, nothing changes, 200 (a bug to investigate, not something Stripe should retry) |
+| `checkout.session.expired`, order `pending_payment` | Order `cancelled`, payment `failed`, stock of every order item given back. One transaction. 200 |
+| same, any other order status | Nothing changes, 200 |
+| Any other event type (for example `payment_intent.created`) | Logged and ignored, 200 |
+
+Out of scope and not handled: `checkout.session.async_payment_succeeded` / `async_payment_failed`, `payment_intent.payment_failed` (Stripe's page lets the customer retry inside the same session), a table of processed event ids, emails, any retry queue of our own.
+
+### Response codes and why
+
+| Code | When | Why |
+|---|---|---|
+| 200 `{"received": true}` | handled, or ignored, or not our problem to retry: unknown session, unknown order, no usable order id in the metadata, an order with a different session, a duplicate, an amount mismatch | Stripe retries every non-2xx response for days. Retrying these would never help |
+| 400 "Invalid webhook request" | missing `Stripe-Signature`, wrong signature, tampered body, timestamp older than 5 minutes, a body that is not valid JSON (even with a valid signature) | A forged or broken request. Nothing is read from the body, nothing changes. The message is generic on purpose |
+| 503 "Webhooks are not configured" | `STRIPE_WEBHOOK_SECRET` is empty | Nothing can be verified, so nothing is processed. Checked before anything else |
+| 500 | a database error or any unexpected exception (the transaction is rolled back), or the late-payment refund failed | Something we should retry: Stripe sends the event again |
+
+The SDK raises `stripe.SignatureVerificationError` (class `stripe._error.SignatureVerificationError` in 16.0.0) for a missing header, a bad header, a wrong signature and an old timestamp, and `ValueError` (`JSONDecodeError`, `UnicodeDecodeError`) for a body that is not JSON. Both give 400. The SDK checks only that a timestamp is too OLD (not too new).
+
+### Idempotency, and why the check is inside the order row lock
+
+Stripe delivers the same event more than once (and retries non-2xx answers), and two deliveries can arrive at the same moment. Checking the status first and updating later would let both deliveries see `pending_payment` and both act (for example giving stock back twice). So the service locks the order row with `SELECT ... FOR UPDATE` (`order_repository.lock_order`, with `populate_existing`) and reads the status **inside the lock**: the second delivery waits at the lock, then reads the status the first one left behind and changes nothing. Only an order that is still `pending_payment` is changed. The two-thread tests (`tests/test_webhooks_concurrency.py`) fail when the lock is removed.
+
+Lock order: this endpoint locks the order row, then updates products in ascending product id order (one atomic `UPDATE products SET stock = stock + n` each, `product_repository.increase_stock`). Checkout locks the cart row, then products in ascending id order, and never locks an order, so the two can never deadlock.
+
+### How the payment is found
+
+1. By `stripe_checkout_session_id` = the session id in the event.
+2. Fallback: `metadata.order_id` (it must be a plain whole number of at most 2147483647: ASCII digits only, so `abc`, `1.5`, `-1`, ` 1`, empty and huge numbers give a logged 200). The fallback matters because checkout stage 2 (M7) can fail **after** the Stripe session exists, which leaves the payment without a session id.
+3. Found by order id and the payment already has a **different** session id: logged, 200, nothing changes. Found by order id and the session id is empty: the event's session id is saved on the payment (together with the change the event causes).
+4. No payment found: warning, 200.
+
+### The late-payment refund
+
+If `checkout.session.completed` (paid, amounts match) arrives for an order that is already `cancelled` (for example the Stripe call in checkout timed out, the order was cancelled by the failure path, but the session still existed and was paid), the order is NOT reactivated and the stock stays as it is (it was already given back). The service saves the payment intent id and commits, then calls `stripe.Refund.create(payment_intent=..., idempotency_key="late-payment-refund-<order id>")`, outside any transaction. If the refund call raises `stripe.StripeError` the answer is 500, so Stripe delivers the event again; the retry reaches the same code and calls the refund again, and the idempotency key makes that safe. A repeated delivery after a successful refund calls it again too (nothing in our tables records "refunded"; Stripe returns the same refund because of the key). The payment stays `failed`.
+
+### Logging
+
+One line per event with only the event id, the event type, the order id and the outcome, through `logging.getLogger(__name__)`. The request body, the signature header and the secrets are never logged (a test checks this with `caplog`). `main.py` calls `logging.basicConfig(level=logging.INFO)`, otherwise Python hides INFO lines. `alembic/env.py` now calls `fileConfig(..., disable_existing_loggers=False)`: the test setup runs Alembic inside the pytest process, and the default `True` silently disabled all existing loggers (including the webhook logger).
+
+### Local webhook setup
+
+1. On the host, run: `stripe listen --events checkout.session.completed,checkout.session.expired --forward-to localhost:8000/webhooks/stripe`
+2. Copy the `whsec_...` secret it prints into `STRIPE_WEBHOOK_SECRET` in `.env`.
+3. Recreate the app container so it reads the new value: `docker compose up -d --force-recreate app`
+4. Pay with the test card `4242 4242 4242 4242` (any future expiry, any CVC). The declined card `4000 0000 0000 0002` shows an error on Stripe's page and lets the customer retry; the order stays `pending_payment`.
+5. To test expiry, run `stripe checkout sessions expire <session id>` (the session id is in the `payments` table: `docker compose exec db psql -U postgres ecommerce -c "select order_id, stripe_checkout_session_id, status from payments"`).
+6. To test duplicates, run `stripe events resend <event id>`.
+
+Without the Stripe CLI the endpoint can still be checked with a wrong signature: `curl -i -X POST localhost:8000/webhooks/stripe -H "Stripe-Signature: t=1,v1=bad" -d '{}'` gives 400 (or 503 while the secret is empty).
+
+### Key design decisions (M8)
+
+- **Decisions CLAUDE.md and the milestone did not cover:**
+  - `handle_stripe_event` takes the `db` session as its first argument (see above).
+  - Failures are reported by raising `HTTPException` (400, 503, 500), like the other services.
+  - The event is converted with `event.to_dict()` and read with plain `.get()` calls. In SDK 16.0.0 a `StripeObject` is not a dict and has no `.get`.
+  - A session id that is missing or not a string is ignored (200). Without this check, a lookup with `None` would turn into `IS NULL` and could match a payment that has no session id yet.
+  - A late payment without a payment intent id cannot be refunded: logged as an error, 200.
+  - The fallback session id and every other change are only saved by the commit of the branch that acts. Branches that change nothing call `db.rollback()` (this also releases the order lock early).
+  - The refund call passes `api_key=settings.STRIPE_SECRET_KEY` (no global key), like the checkout call.
+  - The success page polling window was not changed (see the M8 summary).
+- **Tests:** `stripe.Refund.create` is patched in an autouse fixture, so the real Stripe API can never be reached. Orders are made through the real checkout API with `stripe.checkout.Session.create` patched. The concurrency tests post from two threads through the `client` (lined up by a `threading.Barrier`, fail if a thread is still alive after 15 seconds) and count the "order paid" / "stock restored" log lines to prove the order was changed exactly once. They passed 20 runs in a row together with `tests/test_checkout_concurrency.py`, and the expired test fails when `FOR UPDATE` is removed from `lock_order`.
+- **Not tested here:** the real flow with the Stripe CLI (`stripe listen`, a real payment, `stripe events resend`) needs the CLI and a webhook secret; see "Local webhook setup".
 
 ## Key design decisions (M6)
 

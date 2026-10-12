@@ -1,10 +1,15 @@
+import logging
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers import admin, auth, cart, categories, orders, products, users
+from app.routers import admin, auth, cart, categories, orders, products, users, webhooks
+
+# Show INFO log lines (the webhook logs one line per event) next to the uvicorn logs
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Ecommerce")
 
@@ -16,6 +21,7 @@ app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(cart.router)
 app.include_router(orders.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/health")

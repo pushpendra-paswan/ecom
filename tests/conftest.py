@@ -1,3 +1,8 @@
+import hashlib
+import hmac
+import json
+import time
+
 import bcrypt
 import psycopg
 import pytest
@@ -237,3 +242,41 @@ def committed_data(test_engine, create_user, create_category, create_product):
     # Always remove everything, even when the test failed (CASCADE empties every table that points to these)
     with test_engine.begin() as connection:
         connection.execute(text("TRUNCATE users, categories RESTART IDENTITY CASCADE"))
+
+
+# The signing secret used by the webhook tests (never a real Stripe secret)
+TEST_WEBHOOK_SECRET = "whsec_test_secret_for_tests"
+
+
+@pytest.fixture
+def post_webhook(client, monkeypatch):
+    # Use the test signing secret for the app
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", TEST_WEBHOOK_SECRET)
+
+    # Returns a function that posts a signed Stripe event to /webhooks/stripe.
+    # event: a dictionary (turned into JSON bytes), or bytes that are sent as they are.
+    # timestamp and secret can be changed to make a bad signature. signed_body (bytes) makes the
+    # signature for a different body than the one that is sent (a tampered body).
+    def post(event, timestamp=None, secret=TEST_WEBHOOK_SECRET, signed_body=None):
+        # The exact bytes that are signed are the exact bytes that are sent
+        if isinstance(event, bytes):
+            payload = event
+        else:
+            payload = json.dumps(event).encode()
+        if signed_body is None:
+            signed_body = payload
+        if timestamp is None:
+            timestamp = int(time.time())
+
+        # Stripe-Signature: t=<timestamp>,v1=<HMAC-SHA256 of "<timestamp>.<payload>">
+        signed_text = str(timestamp).encode() + b"." + signed_body
+        signature = hmac.new(secret.encode(), signed_text, hashlib.sha256).hexdigest()
+        header = "t=" + str(timestamp) + ",v1=" + signature
+
+        return client.post(
+            "/webhooks/stripe",
+            content=payload,
+            headers={"Stripe-Signature": header, "Content-Type": "application/json"},
+        )
+
+    return post

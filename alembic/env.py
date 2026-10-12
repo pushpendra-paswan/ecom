@@ -14,7 +14,7 @@ config = context.config
 
 # Set up Python logging from alembic.ini
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The models' metadata, used by "alembic revision --autogenerate".
 target_metadata = Base.metadata

@@ -59,3 +59,28 @@ def get_order(db: Session, user_id: int, order_id: int):
         .where(Order.id == order_id, Order.user_id == user_id)
     )
     return db.execute(query).scalar_one_or_none()
+
+
+def lock_order(db: Session, order_id: int):
+    # Find an order and lock its row (SELECT ... FOR UPDATE), or None if it does not exist.
+    # Anyone else who wants to change this order waits until our transaction ends.
+    # populate_existing makes sure the freshly locked values replace anything already loaded.
+    query = (
+        select(Order)
+        .where(Order.id == order_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return db.execute(query).scalar_one_or_none()
+
+
+def get_payment_by_session_id(db: Session, stripe_checkout_session_id: str):
+    # Find the payment of a Stripe Checkout Session, or None
+    query = select(Payment).where(Payment.stripe_checkout_session_id == stripe_checkout_session_id)
+    return db.execute(query).scalar_one_or_none()
+
+
+def get_payment_by_order_id(db: Session, order_id: int):
+    # Find the payment of an order (there is at most one), or None
+    query = select(Payment).where(Payment.order_id == order_id)
+    return db.execute(query).scalar_one_or_none()
