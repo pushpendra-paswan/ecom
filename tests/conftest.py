@@ -153,13 +153,22 @@ def create_category(test_engine):
 @pytest.fixture
 def create_product(test_engine):
     # Returns a function that inserts a product straight into the test database
-    def create(seller_id, category_id, name="Test product", price=10000, stock=10, is_active=True, created_at=None):
+    def create(
+        seller_id,
+        category_id,
+        name="Test product",
+        price=10000,
+        stock=10,
+        is_active=True,
+        created_at=None,
+        description="A test product",
+    ):
         with Session(test_engine) as session:
             product = Product(
                 seller_id=seller_id,
                 category_id=category_id,
                 name=name,
-                description="A test product",
+                description=description,
                 price=price,
                 stock=stock,
                 is_active=is_active,

@@ -112,6 +112,23 @@ main {
   gap: var(--space-medium);
 }
 
+/* The search form in the navbar */
+.navbar-search {
+  display: flex;
+  flex: 1 1 16rem;
+  gap: var(--space-small);
+  max-width: 28rem;
+}
+
+.navbar-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
 .navbar-user {
   display: flex;
   flex-wrap: wrap;
@@ -351,6 +368,65 @@ button:disabled {
   opacity: 0.6;
 }
 
+/* ===== Products page: sidebar and results ===== */
+.listing-layout {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: var(--space-large);
+  align-items: start;
+}
+
+.filter-sidebar h2 {
+  margin: 0 0 var(--space-small);
+  font-size: 1.1rem;
+}
+
+.filter-sidebar .category-links {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  margin-bottom: var(--space-medium);
+}
+
+.filter-sidebar .category-links a {
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.filter-form label {
+  display: block;
+  margin-top: var(--space-small);
+  margin-bottom: 0.25rem;
+  font-weight: bold;
+}
+
+.filter-form input[type="number"],
+.filter-form select {
+  width: 100%;
+  padding: 0.4rem;
+  font-size: 1rem;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+}
+
+.filter-form .filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+}
+
+.filter-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-medium);
+  margin-top: var(--space-medium);
+}
+
+.listing-results h1 {
+  margin-top: 0;
+}
+
 /* ===== Product detail ===== */
 .product-detail {
   display: grid;
@@ -431,6 +507,22 @@ button:disabled {
 
 /* ===== Responsive ===== */
 @media (max-width: 700px) {
+  .listing-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-medium);
+  }
+
+  .filter-sidebar .category-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .navbar-search {
+    flex-basis: 100%;
+    max-width: none;
+    order: 3;
+  }
+
   .product-detail {
     grid-template-columns: minmax(0, 1fr);
   }

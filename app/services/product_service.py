@@ -6,7 +6,39 @@ from app.repositories import category_repository, product_repository
 from app.schemas.product import CreateProductRequest, UpdateProductRequest
 
 
-def list_public_products(db: Session, page: int, page_size: int, category_slug: str | None):
+def list_public_products(
+    db: Session,
+    page: int,
+    page_size: int,
+    category_slug: str | None,
+    search_text: str | None,
+    min_price: int | None,
+    max_price: int | None,
+    in_stock: bool,
+    sort: str | None,
+):
+    # Remove spaces around the search text. Empty text means "no search".
+    # A NUL character cannot be stored or searched in Postgres text, so it is removed too.
+    if search_text is not None:
+        search_text = search_text.replace("\x00", "").strip()
+        if search_text == "":
+            search_text = None
+
+    # The lowest price cannot be above the highest price
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise HTTPException(status_code=422, detail="min_price cannot be greater than max_price")
+
+    # Sorting by relevance only makes sense when there is a search
+    if sort == "relevance" and search_text is None:
+        raise HTTPException(status_code=422, detail="sort=relevance needs a search text (q)")
+
+    # Pick the default sort: relevance for a search, newest otherwise
+    if sort is None:
+        if search_text is not None:
+            sort = "relevance"
+        else:
+            sort = "newest"
+
     # Turn the category slug (if any) into a category id. An unknown slug is a 404.
     category_id = None
     if category_slug is not None:
@@ -19,8 +51,9 @@ def list_public_products(db: Session, page: int, page_size: int, category_slug: 
     offset = (page - 1) * page_size
 
     # Read the page and the total (active products only)
-    products = product_repository.list_products(db, offset, page_size, True, category_id, None)
-    total = product_repository.count_products(db, True, category_id, None)
+    products, total = product_repository.list_products(
+        db, offset, page_size, True, category_id, None, search_text, min_price, max_price, in_stock, sort
+    )
 
     return {"items": products, "total": total, "page": page, "page_size": page_size}
 
@@ -39,8 +72,9 @@ def list_seller_products(db: Session, current_user: User, page: int, page_size: 
     offset = (page - 1) * page_size
 
     # Read this seller's own products, active or not
-    products = product_repository.list_products(db, offset, page_size, False, None, current_user.id)
-    total = product_repository.count_products(db, False, None, current_user.id)
+    products, total = product_repository.list_products(
+        db, offset, page_size, False, None, current_user.id, None, None, None, False, "newest"
+    )
 
     return {"items": products, "total": total, "page": page, "page_size": page_size}
 

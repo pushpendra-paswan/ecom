@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     Index,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -38,6 +40,7 @@ class Product(Base):
         Index("ix_products_category_id", "category_id"),
         Index("ix_products_price", "price"),
         Index("ix_products_seller_id", "seller_id"),
+        Index("ix_products_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -57,5 +60,26 @@ class Product(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    # Search index text, kept up to date by Postgres itself (name counts more than description).
+    # deferred=True: normal product queries never load it.
+    search_vector: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', name), 'A') || setweight(to_tsvector('english', description), 'B')",
+            persisted=True,
+        ),
+        deferred=True,
+    )
+
     category: Mapped[Category] = relationship()
     seller: Mapped[User] = relationship()
+
+
+# Speeds up the newest-first listing of active products (the home page and the default product list).
+# The condition must be written "is_active IS TRUE" so it matches the SQL that SQLAlchemy sends.
+Index(
+    "ix_products_active_newest",
+    Product.created_at.desc(),
+    Product.id.desc(),
+    postgresql_where=text("is_active IS TRUE"),
+)

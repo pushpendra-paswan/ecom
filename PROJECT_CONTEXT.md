@@ -34,11 +34,11 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
-├── alembic/               # env.py, script.py.mako, versions/ (one migration: initial schema)
+├── alembic/               # env.py, script.py.mako, versions/ (two migrations: initial schema, M5 search)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
 ├── frontend/              # index.html, products.html, product.html, login.html, register.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_frontend_files.py
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -78,7 +78,7 @@ Helper fixtures in `conftest.py` (M2, M3):
 - `create_user(email, role="customer", is_active=True, password="Password@123")`: inserts a user directly into the test database (fast bcrypt rounds) and returns the user id.
 - `auth_headers(email, password="Password@123")`: logs in through `/auth/login` and returns `{"Authorization": "Bearer ..."}`.
 - `create_category(name, slug=None)` (M3): inserts a category directly and returns its id. The slug defaults to the lowercased name with spaces turned into hyphens.
-- `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None)` (M3): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
+- `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None, description="A test product")` (M3, `description` added in M5): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
 ## Completed milestones
 
@@ -87,14 +87,15 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M2: Authentication, roles and user accounts.** Register, login (JWT), profile, addresses, admin user list, role dependencies, login/register pages, shared `api.js`, 32 tests passing. No schema change (no new migration).
 - **M3: Catalog API.** Public category and product reads, admin category management, seller/admin product management with soft delete, `/seller/products`. No schema change (no new migration). 56 tests passing.
 - **M4: Storefront frontend.** Shared navbar and footer (`layout.js`), home page, product listing page, product detail page, one product card function, one stylesheet, placeholder image. Read-only: no search, no cart. No backend or schema change. 57 tests passing (one new test that checks the frontend files are served).
+- **M5: Search, filter, sort and indexes.** `GET /products` takes `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`, `page_size`. Postgres full-text search (generated `search_vector` column + GIN index), one extra partial index for the newest-first listing, the products page with a filter sidebar, a navbar search box, before/after measurements (see "Search (M5)"). One migration (`099593dc45a9`). 91 tests passing (34 new in `tests/test_search.py`).
 
 ## Pending milestones
 
-M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
-Created by the single migration `alembic/versions/6fc51572ed70_create_initial_schema.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
+Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M5 added the `products.search_vector` column and two indexes in `alembic/versions/099593dc45a9_add_product_search_vector.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
 
 **users**: `email` varchar(255) unique not null; `password_hash` not null; `full_name` not null; `role` varchar(20) default `customer`, CHECK in (`customer`, `seller`, `admin`); `is_active` bool default true; `created_at`.
 
@@ -102,7 +103,7 @@ Created by the single migration `alembic/versions/6fc51572ed70_create_initial_sc
 
 **categories**: `name` unique; `slug` unique; `description` (nullable); `created_at`. Flat list, no parent.
 
-**products**: `seller_id` FK users (no action); `category_id` FK categories (no action); `name`; `description`; `price` CHECK `> 0`; `stock` CHECK `>= 0`; `image_url` (nullable); `is_active` default true; `created_at`; `updated_at`. Indexes: `ix_products_category_id`, `ix_products_price`, `ix_products_seller_id`. (No search index yet, that is M5.)
+**products**: `seller_id` FK users (no action); `category_id` FK categories (no action); `name`; `description`; `price` CHECK `> 0`; `stock` CHECK `>= 0`; `image_url` (nullable); `is_active` default true; `created_at`; `updated_at`; `search_vector` (M5, `tsvector`, NOT NULL, `GENERATED ALWAYS AS (setweight(to_tsvector('english', name), 'A') || setweight(to_tsvector('english', description), 'B')) STORED`; Postgres keeps it up to date, the app never writes it). Indexes: see "Indexes on products" under "Search (M5)".
 
 **carts**: `user_id` FK users **ON DELETE CASCADE**, UNIQUE (one cart per user); `created_at`.
 
@@ -175,7 +176,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M3)
+## API endpoints (as of M5)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -193,7 +194,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | POST `/categories` | admin only | Returns 201. Duplicate name or slug: 409. Name with no letters or digits: 422 |
 | PUT `/categories/{category_id}` | admin only | Same body and rules as create. Missing: 404 |
 | DELETE `/categories/{category_id}` | admin only | Returns 204. Any product (active or not) uses it: 409 `"Category has products"`. Missing: 404 |
-| GET `/products` | public | Paginated, active products only, newest first. Query: `page`, `page_size`, `category` (slug) |
+| GET `/products` | public | Paginated, active products only. Search, filters and sort: see "Search (M5)" |
 | GET `/products/{product_id}` | public | Missing or inactive: 404 |
 | POST `/products` | seller only | Returns 201. Admin and customer get 403. Unknown `category_id`: 400 |
 | PATCH `/products/{product_id}` | seller (own products) or admin (any) | Partial update. Customer: 403. Other seller's product or missing: 404 |
@@ -275,7 +276,7 @@ The seller's email and every other private field are never returned. Lists are w
 | URL | Query parameters | Files |
 |---|---|---|
 | `/` | none | `frontend/index.html`, `home.js` |
-| `/products.html` | `category` (a category slug), `page` (default 1; anything below 1 or not a number becomes 1) | `frontend/products.html`, `products.js` |
+| `/products.html` | `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`. **Prices in the page URL are in RUPEES** (see "Search (M5)"). `page` defaults to 1; anything below 1 or not a number becomes 1 | `frontend/products.html`, `products.js` |
 | `/product.html` | `id` (positive whole number; anything else shows "Product not found" without calling the API) | `frontend/product.html`, `product.js` |
 | `/login.html` | none | `frontend/login.html`, `login.js` |
 | `/register.html` | none | `frontend/register.html`, `register.js` |
@@ -283,14 +284,14 @@ The seller's email and every other private field are never returned. Lists are w
 | Script (`static/js/`) | What it does |
 |---|---|
 | `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
-| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads |
+| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads |
 | `product-card.js` | `buildProductCard(product)`: returns the `<a>` card used by the home and listing pages (image with one-time placeholder fallback, name, price, "Out of stock" label) |
 | `home.js` | Category cards (`GET /categories`) and the 8 newest products (`GET /products?page=1&page_size=8`) |
-| `products.js` | Category link row, heading, total count, product grid (20 per page) and Previous/Next links |
+| `products.js` | Sidebar (category links, filter form), heading, total count, product grid (20 per page) and Previous/Next links. Converts rupees from the URL to paise for the API (M5) |
 | `product.js` | Product detail (image, name, category link, seller, price, stock status, description) |
 | `login.js`, `register.js` | The two forms (from M2) |
 
-`static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
+`static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, products page sidebar, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
 
 ### How to add a new page
 
@@ -328,17 +329,171 @@ The seller's email and every other private field are never returned. Lists are w
 - `stock` can be 0: show "out of stock" and do not offer add-to-cart.
 - `GET /products?category=<slug>` filters by category and gives 404 for an unknown slug.
 
-## Notes for M5 (search, filter, sort)
+## Search (M5)
 
-- **Frontend:** `products.html` and `products.js` are where search, filters and sorting go (read the new query parameters next to `category` and `page`, and keep them in the Previous/Next links). The navbar search box is added in `layout.js`. The category links row already exists in `products.js`.
-- `GET /products` already has: `page`, `page_size`, `category` (slug). Sorting is fixed to newest first (`created_at DESC, id DESC`).
-- Still missing: text search (and the search index), `min_price` / `max_price`, and sort options. Add them to the same endpoint, `product_service.list_public_products`, and the matching `product_repository.list_products` / `count_products` (both take the same filters, so keep them in step).
-- `/seller/products` uses the same repository functions (with `only_active=False` and `seller_id`), so new filters added there are optional for it.
+### `GET /products` query parameters (all optional, all combinable)
+
+| Parameter | Type | Limits | Default | Notes |
+|---|---|---|---|---|
+| `q` | string | trimmed; at most 100 characters (101 gives 422); empty or only spaces counts as no search | none | Full-text search on name and description (see below) |
+| `category` | string | a category slug | none | Unknown slug: 404 |
+| `min_price` | integer, paise | 0 to 2147483647, inclusive | none | Greater than `max_price`: 422 |
+| `max_price` | integer, paise | 0 to 2147483647, inclusive | none | |
+| `in_stock` | boolean | `true` / `false` | `false` | `true` shows only products with `stock > 0` |
+| `sort` | one of `relevance`, `newest`, `price_asc`, `price_desc`, `name_asc` | anything else gives 422 | `relevance` when `q` is present, otherwise `newest` | `relevance` without `q` gives 422 |
+| `page` | integer | 1 or more | 1 | |
+| `page_size` | integer | 1 to 100 | 20 | |
+
+- Only active products are ever returned, with every combination. Every sort ends with `id DESC`, so pages are stable. The response shape is unchanged (`items`, `total`, `page`, `page_size`); `total` counts the products after all filters.
+- Orders: `newest` = `created_at DESC`; `price_asc` / `price_desc` = `price`; `name_asc` = `name ASC`; `relevance` = `ts_rank(search_vector, query) DESC` (a name match has weight A, a description match weight B, so name matches rank higher).
+- The price upper limit 2147483647 is the database integer limit. Without it a huge value made Postgres fail with a 500.
+
+### How the search works
+
+- Postgres built-in full-text search only (no extension). `search_vector @@ websearch_to_tsquery('english', q)`.
+- **Syntax** (websearch): several words must all match; `"quoted phrase"` needs the words next to each other in order; `a or b` matches either; a leading `-word` excludes it. Any other input (`'`, `&`, `:*`, `(`, `)`, `!`, SQL text) is just text and never causes a syntax error.
+- **Whole words and stems** (the `english` configuration): "phones" finds "phone" and the other way round; "running" finds "run". Common words (stop words such as "the", "a", "of") are ignored, so a search made only of them returns 200 with an empty list.
+- **Limitations:** no partial words ("pho" does not find "phone"), no typo tolerance, no "did you mean", no highlighting, no search inside `/seller/products`. Words are stemmed with the English rules only, so product names in other languages are matched as plain words.
+- A NUL character (`%00`) in `q` is removed by the service, because Postgres text cannot hold it (it would be a 500).
+- All rules (trim, min/max check, default sort) live in `product_service.list_public_products`. The repository `list_products` has no business rules: it builds one list of WHERE conditions and uses it for both the page query and the count query, and it returns `(products, total)`. `count_products` was removed. `/seller/products` calls the same function with `only_active=False`, a `seller_id`, no search and `sort="newest"`.
+
+### URL of `products.html` (rupees in the page URL, paise in the API)
+
+| URL parameter | Meaning |
+|---|---|
+| `q` | Search text (shown with `textContent` only) |
+| `category` | Category slug |
+| `min_price`, `max_price` | **In RUPEES.** The page converts with `Math.round(Number(value) * 100)` before calling the API, which takes **paise** |
+| `in_stock` | `1` = in stock only |
+| `sort` | `relevance` (only with `q`; without `q` it is treated as `newest`), `newest`, `price_asc`, `price_desc`, `name_asc` |
+| `page` | 1 or more |
+
+The sidebar form is a plain GET form to `/products.html` (hidden inputs keep `q` and `category`, and are disabled when empty). It does not send `page`, so applying filters returns to page 1. The sort dropdown submits the form on change. "Clear filters" keeps only `q` and `category`. Category links keep `q`, the price filters, `in_stock` and `sort`, and drop `page`. The navbar search form sends only `q`, so a new search drops the category and the filters. Bad price input (not a number, negative, too large, min above max) shows a message and does not call the API.
+
+### Indexes on products
+
+| Index | Definition | Why it exists |
+|---|---|---|
+| `products_pkey` | `btree (id)` | Primary key, detail page |
+| `ix_products_category_id` | `btree (category_id)` | Category filter, the foreign key (M1) |
+| `ix_products_price` | `btree (price)` | Price range filter and price sort (M1). Measured: the price-range query uses it (0.04 ms) |
+| `ix_products_seller_id` | `btree (seller_id)` | `/seller/products`, the foreign key (M1) |
+| `ix_products_search_vector` | `gin (search_vector)` | Full-text search (M5) |
+| `ix_products_active_newest` | `btree (created_at DESC, id DESC) WHERE is_active IS TRUE` (partial) | Newest-first listing of active products: the home page, the default listing and the category listing (M5, measured below) |
+
+The partial index condition is written `is_active IS TRUE` on purpose. SQLAlchemy's `Product.is_active.is_(True)` sends `is_active IS true`, and Postgres did **not** use an index declared with `WHERE is_active` for that query (measured: still a sequential scan). Keep the two spellings identical.
+
+Migration `099593dc45a9` was checked by hand. `alembic upgrade head`, `downgrade -1`, `upgrade head` all work, and `alembic revision --autogenerate` found no drift (the empty revision was deleted).
+
+### Search performance
+
+All measurements: Postgres 16 in the `db` container, default settings, 120 seeded rows plus 50,000 temporary rows inside a transaction that is rolled back (the dev database has 120 products afterwards, checked with `select count(*) from products`). The SQL is exactly what SQLAlchemy sends (captured with a `before_cursor_execute` listener), with literal values. "Execution time" is from `EXPLAIN (ANALYZE, BUFFERS)`, second run (warm cache). Numbers are from one machine and vary a little between runs.
+
+The template in the milestone gave every sample row the same `created_at` and the same category. That would make the newest-first and category queries meaningless, so the sample rows spread `created_at` (one per minute) and rotate through all categories. Everything else is as given.
+
+**Setup block** (run inside `BEGIN; ... ROLLBACK;`, then `VACUUM ANALYZE products;`):
+
+```sql
+INSERT INTO products (seller_id, category_id, name, description, price, stock, is_active, created_at)
+SELECT (SELECT id FROM users WHERE role = 'seller' ORDER BY id LIMIT 1),
+       (SELECT array_agg(id ORDER BY id) FROM categories)[1 + g % (SELECT count(*) FROM categories)],
+       'Sample product ' || g || ' ' || (ARRAY['laptop','phone','book','shirt','chair','bottle'])[1 + g % 6],
+       'Description text for sample product number ' || g,
+       100 + (g % 5000) * 100, 10, true,
+       now() - g * interval '1 minute'
+FROM generate_series(1, 50000) g;
+ANALYZE products;
+```
+
+**Commands** (the files were kept outside the project; they contain the setup block above followed by the `EXPLAIN` statements below):
+
+```bash
+docker compose cp setup.sql db:/tmp/setup.sql
+docker compose cp stage1.sql db:/tmp/stage1.sql      # BEGIN; \i /tmp/setup.sql; EXPLAIN ...; ROLLBACK; VACUUM ANALYZE products;
+docker compose exec -T db psql -U postgres ecommerce -f /tmp/stage1.sql
+docker compose exec -T db psql -U postgres ecommerce -c "select count(*) from products"   # must print 120
+```
+
+The search statements (the page query is the real one with its two `LEFT OUTER JOIN`s; shortened here to the part that matters):
+
+```sql
+-- Stage 1 (ILIKE), page query and count query
+EXPLAIN (ANALYZE, BUFFERS) SELECT products.id, products.name FROM products
+  LEFT OUTER JOIN categories AS categories_1 ON categories_1.id = products.category_id
+  LEFT OUTER JOIN users AS users_1 ON users_1.id = products.seller_id
+  WHERE products.is_active IS true
+    AND (products.name ILIKE '%charger%' ESCAPE '\' OR products.description ILIKE '%charger%' ESCAPE '\')
+  ORDER BY products.created_at DESC, products.id DESC LIMIT 20 OFFSET 0;
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM products WHERE products.is_active IS true
+  AND (products.name ILIKE '%charger%' ESCAPE '\' OR products.description ILIKE '%charger%' ESCAPE '\');
+
+-- Stage 2 (full-text), page query (relevance) and count query
+EXPLAIN (ANALYZE, BUFFERS) SELECT products.id, products.name FROM products
+  LEFT OUTER JOIN categories AS categories_1 ON categories_1.id = products.category_id
+  LEFT OUTER JOIN users AS users_1 ON users_1.id = products.seller_id
+  WHERE products.is_active IS true
+    AND (products.search_vector @@ websearch_to_tsquery('english'::regconfig, 'charger'))
+  ORDER BY ts_rank(products.search_vector, websearch_to_tsquery('english'::regconfig, 'charger')) DESC, products.id DESC
+  LIMIT 20 OFFSET 0;
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM products WHERE products.is_active IS true
+  AND (products.search_vector @@ websearch_to_tsquery('english'::regconfig, 'charger'));
+```
+
+The search word `charger` is rare (1 match in 50,120 rows), which is what a normal product search looks like. `laptop` (1 row in 6) is the common-word case.
+
+**Before (stage 1, ILIKE `'%text%'`, no usable index) and after (stage 2, full-text, GIN index present):**
+
+| Query (50,120 rows) | Plan | Execution time |
+|---|---|---|
+| Stage 1, `charger`, page query | Seq Scan + Sort | **74.3 ms** |
+| Stage 1, `charger`, count query | Seq Scan | 72.4 ms |
+| Stage 1, `laptop` (8,335 matches), page query | Seq Scan + top-N heapsort | 68.5 ms |
+| Stage 2, `charger`, page query | **Seq Scan** + Sort (planner choice) | **11.4 ms** |
+| Stage 2, `charger`, count query | Seq Scan (planner choice) | 11.4 ms |
+| Stage 2, `laptop`, page query | Seq Scan + top-N heapsort | 14.4 ms |
+| Stage 2, `charger`, count query with `SET LOCAL enable_seqscan = off` | **Bitmap Heap Scan + Bitmap Index Scan on `ix_products_search_vector`** | **2.6 ms** (the same query was 11.0 ms as a seq scan) |
+
+**The expected bitmap index scan did not happen by itself on this data.** With the milestone's sample rows (a 13 MB table, about 40 characters of description per row) the planner estimates 251 matching rows for `charger` (the real number is 1), prices the GIN scan at about the same as a sequential scan (2374 against 2298) and picks the sequential scan. The full-text version is still about 6 times faster than ILIKE (11 ms against 74 ms) because it compares one stored `tsvector` per row instead of running two `ILIKE` patterns, and the index is 4 times faster again when it is used (2.6 ms). Realistic descriptions make the index matter more. A second run with 60 random words in every description (table 78 MB, GIN index 111 MB, otherwise the same):
+
+| Query (60-word descriptions) | Plan | Execution time |
+|---|---|---|
+| ILIKE count, `charger` | Seq Scan | 236 ms |
+| Full-text count, `charger`, planner's own choice | **Bitmap Heap Scan + Bitmap Index Scan on `ix_products_search_vector`** | **0.3 to 0.6 ms** |
+| Full-text count, `charger`, with `SET LOCAL enable_bitmapscan = off` | Seq Scan | 22.7 ms |
+
+So on rows with real-sized text the planner chooses the GIN index by itself, and it is about 400 to 800 times faster than the ILIKE version. The index costs disk space (111 MB for 78 MB of table in this test, a worst case with 60 distinct words per row) and slows inserts and updates a little.
+
+**Other queries** (page queries with the two joins, 50,120 rows). Measured before adding any extra index:
+
+| Query | Plan before | Time before | Plan after `ix_products_active_newest` | Time after |
+|---|---|---|---|---|
+| Default listing (newest, active only) | Seq Scan + top-N heapsort (reads all 50,118 rows) | 14.8 ms | Index Scan using `ix_products_active_newest` | 0.02 ms |
+| Category filter, newest | Bitmap Index Scan on `ix_products_category_id` + top-N heapsort of 5,012 rows | 2.7 ms | Index Scan using `ix_products_active_newest` (stops after 20 matching rows) | 0.04 ms |
+| Price range 1000 to 5000 rupees, `price_asc` | Index Scan using `ix_products_price` | 0.04 ms | unchanged | 0.03 ms |
+
+**Decision on extra indexes:** one was added, `ix_products_active_newest` (partial, `(created_at DESC, id DESC) WHERE is_active IS TRUE`). Evidence: the default listing was a sequential scan plus a sort of every active row (14.8 ms and growing with the table), and the same index also fixed the category listing (2.7 ms to 0.04 ms). The `(category_id, price)` index was **not** added: the price query already uses `ix_products_price` at 0.04 ms, so there is no evidence for it. The existing `category_id`, `price` and `seller_id` indexes are unchanged.
+
+**Known limit:** the total count (`SELECT count(*) ... WHERE is_active`) is still a sequential scan (about 9.7 ms for 50,000 rows, before and after the new index), because every row has to be counted. This is fine for this project's size. If it ever matters, the usual fixes are caching the total or an estimated count; neither is in scope.
 
 ## Notes for M6 (cart)
 
-- **Frontend:** the cart link and the cart count badge go in `layout.js` (inside the navbar). The Add to Cart control goes in `product.html` and `product.js` (hide or disable it when `stock` is 0). The cart pages (and checkout and orders later) must set `data-requires-login="true"` on `<body>`.
+- **Frontend:** the cart link and the cart count badge go in `layout.js` (inside the navbar, next to the search form added in M5; `.navbar-user` or `.navbar-links` are the natural places). The Add to Cart control goes in `product.html` and `product.js` (hide or disable it when `stock` is 0). The cart pages (and checkout and orders later) must set `data-requires-login="true"` on `<body>`.
 - A cart can contain products that are deactivated later (soft delete keeps the row). The cart must handle inactive products: show them as unavailable and refuse them at checkout. `product_repository.get_product_by_id` returns inactive products too; check `is_active` yourself. Adding a product to the cart should reject missing and inactive products.
+
+## Key design decisions (M5)
+
+- **Decisions CLAUDE.md did not cover:**
+  - `list_products` now returns `(products, total)` and `count_products` was deleted, so the WHERE conditions are built once (the milestone asked for one shared list). The seller list uses the same function.
+  - The service rejects `min_price > max_price` and `sort=relevance` without `q` with 422 and a plain-text `detail`.
+  - `min_price` / `max_price` have an upper limit of 2147483647 (the database integer), otherwise a huge value caused a 500.
+  - A NUL character in `q` is stripped in the service (it would be a 500 otherwise).
+  - `in_stock` is `bool`, default `false`; `false` means "no stock filter".
+  - The extra partial index `ix_products_active_newest` was added with measured evidence (see "Search performance"). The declared condition is `is_active IS TRUE` so Postgres matches it to SQLAlchemy's SQL.
+  - `deferred=True` on `search_vector`; it is only used inside WHERE and ORDER BY, never loaded or returned.
+  - The tests' `create_product` fixture got an optional `description` argument.
+  - `sort` in the page URL is carried into links only when the URL already had one, so default URLs stay short. The sort dropdown always sends it.
+- Stage 1 (ILIKE) was built and measured first, then fully deleted. No ILIKE code remains.
+- Frontend: tested by hand in headless Chrome (search, filters, sort, category with search kept, Next/Previous, empty state, price error, `<script>alert(1)</script>` in `q` shown as text, 420px wide).
 
 ## Key design decisions (M3)
 

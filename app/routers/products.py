@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
@@ -28,12 +30,31 @@ def list_my_products(
 
 @router.get("/products", response_model=ProductListResponse)
 def list_products(
+    q: str | None = Query(
+        None,
+        max_length=100,
+        description="Search text for the name and description. Words are matched whole (with stems). "
+        'Supports "quoted phrases", or, and -excluded words.',
+    ),
+    category: str | None = Query(None, description="Category slug. An unknown slug returns 404."),
+    min_price: int | None = Query(
+        None, ge=0, le=2147483647, description="Lowest price in paise (inclusive, at most 2147483647)"
+    ),
+    max_price: int | None = Query(
+        None, ge=0, le=2147483647, description="Highest price in paise (inclusive, at most 2147483647)"
+    ),
+    in_stock: bool = Query(False, description="true shows only products with stock above 0"),
+    sort: Literal["relevance", "newest", "price_asc", "price_desc", "name_asc"] | None = Query(
+        None,
+        description="Default is relevance when q is given, otherwise newest. relevance needs q.",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    category: str | None = None,
     db: Session = Depends(get_db),
 ):
-    return product_service.list_public_products(db, page, page_size, category)
+    return product_service.list_public_products(
+        db, page, page_size, category, q, min_price, max_price, in_stock, sort
+    )
 
 
 @router.get("/products/{product_id}", response_model=ProductResponse)

@@ -26,10 +26,34 @@ async function showLayout() {
   productsLink.textContent = "All Products";
   navLinks.append(homeLink, productsLink);
 
+  // The search form: a plain GET form to the products page. It only sends q, so a new
+  // search never keeps the category or the filters.
+  const searchForm = document.createElement("form");
+  searchForm.className = "navbar-search";
+  searchForm.method = "get";
+  searchForm.action = "/products.html";
+  searchForm.setAttribute("role", "search");
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.name = "q";
+  searchInput.maxLength = 100;
+  searchInput.placeholder = "Search products";
+  searchInput.setAttribute("aria-label", "Search products");
+  const searchButton = document.createElement("button");
+  searchButton.type = "submit";
+  searchButton.textContent = "Search";
+  searchForm.append(searchInput, searchButton);
+
+  // Show the current search text in the input (the value property, never innerHTML)
+  const currentQuery = new URLSearchParams(window.location.search).get("q");
+  if (currentQuery !== null) {
+    searchInput.value = currentQuery;
+  }
+
   const userArea = document.createElement("div");
   userArea.className = "navbar-user";
 
-  navbar.append(brandLink, navLinks, userArea);
+  navbar.append(brandLink, navLinks, searchForm, userArea);
   siteHeader.append(navbar);
 
   // Build the footer: site name, current year and a link to Home

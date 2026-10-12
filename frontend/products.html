@@ -3,25 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>All products</title>
+  <title>Products</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <header id="site-header"></header>
 
   <main class="container">
-    <!-- Row of category links (filled by products.js) -->
-    <div id="category-links-area"><p class="state-loading">Loading...</p></div>
+    <div class="listing-layout">
+      <!-- Sidebar: category links and the filter form (filled by products.js) -->
+      <aside class="filter-sidebar">
+        <h2>Categories</h2>
+        <div id="category-links-area"><p class="state-loading">Loading...</p></div>
 
-    <!-- Heading and total count (filled by products.js) -->
-    <h1 id="page-heading"></h1>
-    <p id="product-count" class="product-count"></p>
+        <h2>Filters</h2>
+        <!-- Prices here are in rupees. products.js converts them to paise for the API. -->
+        <form id="filter-form" class="filter-form" method="get" action="/products.html">
+          <!-- These two keep the search and the category when the form is sent -->
+          <input type="hidden" id="filter-q" name="q">
+          <input type="hidden" id="filter-category" name="category">
 
-    <!-- Product cards (filled by products.js) -->
-    <div id="products-area"><p class="state-loading">Loading...</p></div>
+          <label for="filter-min-price">Minimum price (in rupees)</label>
+          <input type="number" id="filter-min-price" name="min_price" min="0" step="1">
 
-    <!-- Previous / Next (filled by products.js) -->
-    <div id="pagination-area"></div>
+          <label for="filter-max-price">Maximum price (in rupees)</label>
+          <input type="number" id="filter-max-price" name="max_price" min="0" step="1">
+
+          <label class="filter-checkbox">
+            <input type="checkbox" id="filter-in-stock" name="in_stock" value="1">
+            In stock only
+          </label>
+
+          <label for="filter-sort">Sort by</label>
+          <select id="filter-sort" name="sort"></select>
+
+          <div class="filter-buttons">
+            <button type="submit">Apply</button>
+            <a id="clear-filters-link" href="/products.html">Clear filters</a>
+          </div>
+        </form>
+      </aside>
+
+      <!-- Results -->
+      <section class="listing-results">
+        <h1 id="page-heading"></h1>
+        <p id="product-count" class="product-count"></p>
+
+        <!-- A problem with the price filters (filled by products.js) -->
+        <div id="filter-message-area"></div>
+
+        <!-- Product cards (filled by products.js) -->
+        <div id="products-area"><p class="state-loading">Loading...</p></div>
+
+        <!-- Previous / Next (filled by products.js) -->
+        <div id="pagination-area"></div>
+      </section>
+    </div>
   </main>
 
   <footer id="site-footer"></footer>
