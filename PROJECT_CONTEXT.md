@@ -27,18 +27,18 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── db.py              # engine, SessionLocal, Base, get_db
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
-│   ├── schemas/           # user.py, address.py, category.py, product.py
-│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py
-│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py
-│   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py
+│   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py
+│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py
+│   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
 ├── alembic/               # env.py, script.py.mako, versions/ (two migrations: initial schema, M5 search)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
-├── frontend/              # index.html, products.html, product.html, login.html, register.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_frontend_files.py
+├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -88,10 +88,11 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M3: Catalog API.** Public category and product reads, admin category management, seller/admin product management with soft delete, `/seller/products`. No schema change (no new migration). 56 tests passing.
 - **M4: Storefront frontend.** Shared navbar and footer (`layout.js`), home page, product listing page, product detail page, one product card function, one stylesheet, placeholder image. Read-only: no search, no cart. No backend or schema change. 57 tests passing (one new test that checks the frontend files are served).
 - **M5: Search, filter, sort and indexes.** `GET /products` takes `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`, `page_size`. Postgres full-text search (generated `search_vector` column + GIN index), one extra partial index for the newest-first listing, the products page with a filter sidebar, a navbar search box, before/after measurements (see "Search (M5)"). One migration (`099593dc45a9`). 91 tests passing (34 new in `tests/test_search.py`).
+- **M6: Cart.** Customer-only cart API (`/cart`, `/cart/count`, `/cart/items`), atomic upserts, per-line problem reporting, cart page, navbar Cart link with badge, Add to Cart on the product page, `?next=` login redirect. No schema change (no new migration; only the `CartItem.product` relationship was added). 109 tests passing (18 new in `tests/test_cart.py`).
 
 ## Pending milestones
 
-M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -117,7 +118,7 @@ Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M5 add
 
 Constraints are named explicitly (`ck_<table>_<rule>`, `uq_cart_items_cart_id_product_id`); unique and FK constraints use Postgres default names.
 
-ORM relationships (only these five): `Product.category`, `Product.seller` (added in M3, no schema change), `Cart.items`, `Order.items`, `Order.payment`. Everything else is queried by id in repositories.
+ORM relationships (only these six): `Product.category`, `Product.seller` (added in M3, no schema change), `Cart.items`, `CartItem.product` (added in M6, no schema change), `Order.items`, `Order.payment`. Everything else is queried by id in repositories.
 
 ## Seed data
 
@@ -176,7 +177,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M5)
+## API endpoints (as of M6)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -200,15 +201,23 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | PATCH `/products/{product_id}` | seller (own products) or admin (any) | Partial update. Customer: 403. Other seller's product or missing: 404 |
 | DELETE `/products/{product_id}` | seller (own products) or admin (any) | Soft delete, returns 204 (also when already inactive). Same rules as PATCH |
 | GET `/seller/products` | seller only | Paginated, the caller's own products, active or not, newest first |
+| GET `/cart` | customer only | The caller's cart (shape under "Cart (M6)"). Never changes data; creates no cart row |
+| GET `/cart/count` | customer only | `{"item_count": N}`, one query |
+| POST `/cart/items` | customer only | Returns 200. Body `{product_id, quantity (1 to 10, default 1)}`. Adds to the quantity. Missing or inactive product: 404. Over the limit: 409 |
+| PATCH `/cart/items/{product_id}` | customer only | Body `{quantity (1 to 10)}`. Sets the exact quantity. Not in the cart: 404. Inactive product or over the limit: 409 |
+| DELETE `/cart/items/{product_id}` | customer only | Always 204, even if the line was not there |
+| DELETE `/cart` | customer only | Removes all lines, always 204. The cart row stays |
 
-The pages `/`, `/products.html`, `/product.html`, `/login.html` and `/register.html` and everything under `/static` are public files.
+All cart endpoints: no token gives 401, a seller or admin gives 403 (`require_customer`).
+
+The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html` and `/register.html` and everything under `/static` are public files (`/cart.html` itself is only an HTML shell; its data comes from `GET /cart`, which needs a customer token).
 
 ## Auth flow (M2)
 
 - **Register** creates a `customer` or `seller` (never `admin`; the seed creates admins). Email is trimmed and lowercased, password is 8 to 72 characters (also max 72 bytes), stored only as a bcrypt hash. Duplicate email: 409.
 - **Login** looks up the lowercased email, checks the bcrypt password first, then `is_active`. Unknown email and wrong password give the same 401 `"Incorrect email or password"` (an unknown email still runs one bcrypt hash so timing is similar). A correct password on a disabled account gives 403 `"Account is disabled"`.
 - **Token:** PyJWT, HS256, signed with `JWT_SECRET`. Payload is only `sub` (user id as a string) and `exp` (`JWT_EXPIRE_MINUTES`, default 60). The role is NOT in the token.
-- **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and throws; it goes to `/login.html` only when the page's `<body>` has `data-requires-login="true"` (changed in M4).
+- **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and throws; it goes to `/login.html?next=<encoded path and query of the current page>` only when the page's `<body>` has `data-requires-login="true"` (changed in M4, `next` added in M6).
 - **Every request** to a protected endpoint goes through `get_current_user` (in `app/core/dependencies.py`): it reads the Bearer header (`HTTPBearer(auto_error=False)`), decodes the token, loads the user from the database and returns the user. The role and `is_active` always come from the database.
 - **401** (`"Not authenticated"`, with `WWW-Authenticate: Bearer`): missing header, bad signature, expired token, no `sub`/`exp`, user not found, or user disabled.
 - **403:** logged in, but the role is wrong. `require_customer`, `require_seller` and `require_admin` check that the role is exactly that role (an admin does NOT pass `require_customer` or `require_seller`).
@@ -278,18 +287,20 @@ The seller's email and every other private field are never returned. Lists are w
 | `/` | none | `frontend/index.html`, `home.js` |
 | `/products.html` | `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`. **Prices in the page URL are in RUPEES** (see "Search (M5)"). `page` defaults to 1; anything below 1 or not a number becomes 1 | `frontend/products.html`, `products.js` |
 | `/product.html` | `id` (positive whole number; anything else shows "Product not found" without calling the API) | `frontend/product.html`, `product.js` |
-| `/login.html` | none | `frontend/login.html`, `login.js` |
-| `/register.html` | none | `frontend/register.html`, `register.js` |
+| `/cart.html` | none. `<body data-requires-login="true">` | `frontend/cart.html`, `cart.js` |
+| `/login.html` | `next` (optional, see "Cart (M6)") | `frontend/login.html`, `login.js` |
+| `/register.html` | `next` (optional, same rule) | `frontend/register.html`, `register.js` |
 
 | Script (`static/js/`) | What it does |
 |---|---|
-| `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
-| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads |
+| `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html?next=...` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
+| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads. For a **customer** it also adds a "Cart" link with the badge `<span id="cart-count">` and fills it from `GET /cart/count` (M6) |
 | `product-card.js` | `buildProductCard(product)`: returns the `<a>` card used by the home and listing pages (image with one-time placeholder fallback, name, price, "Out of stock" label) |
 | `home.js` | Category cards (`GET /categories`) and the 8 newest products (`GET /products?page=1&page_size=8`) |
 | `products.js` | Sidebar (category links, filter form), heading, total count, product grid (20 per page) and Previous/Next links. Converts rupees from the URL to paise for the API (M5) |
-| `product.js` | Product detail (image, name, category link, seller, price, stock status, description) |
-| `login.js`, `register.js` | The two forms (from M2) |
+| `product.js` | Product detail (image, name, category link, seller, price, stock status, buy area, description). M6: calls `GET /users/me` once (if a token exists) and shows the buy area, see "Cart (M6)" |
+| `cart.js` | M6: one function `loadCart()` fetches `GET /cart` and draws the whole cart page. Called on page load and after every change |
+| `login.js`, `register.js` | The two forms (from M2). M6: after success they go to the `next` page (rule below) instead of always `/` |
 
 `static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, products page sidebar, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
 
@@ -475,10 +486,79 @@ So on rows with real-sized text the planner chooses the GIN index by itself, and
 
 **Known limit:** the total count (`SELECT count(*) ... WHERE is_active`) is still a sequential scan (about 9.7 ms for 50,000 rows, before and after the new index), because every row has to be counted. This is fine for this project's size. If it ever matters, the usual fixes are caching the total or an estimated count; neither is in scope.
 
-## Notes for M6 (cart)
+## Cart (M6)
 
-- **Frontend:** the cart link and the cart count badge go in `layout.js` (inside the navbar, next to the search form added in M5; `.navbar-user` or `.navbar-links` are the natural places). The Add to Cart control goes in `product.html` and `product.js` (hide or disable it when `stock` is 0). The cart pages (and checkout and orders later) must set `data-requires-login="true"` on `<body>`.
-- A cart can contain products that are deactivated later (soft delete keeps the row). The cart must handle inactive products: show them as unavailable and refuse them at checkout. `product_repository.get_product_by_id` returns inactive products too; check `is_active` yourself. Adding a product to the cart should reject missing and inactive products.
+### `GET /cart` response
+
+```json
+{"items": [{"product_id": 7, "name": "...", "image_url": "... or null", "unit_price": 49900, "stock": 5,
+            "is_active": true, "quantity": 2, "line_total": 99800, "available": true, "problem": null}],
+ "item_count": 2, "subtotal": 99800, "has_problems": false}
+```
+
+- Money is integer paise. `unit_price` is always the **current** product price (the cart stores no price). `line_total = unit_price * quantity`. Lines are ordered by `cart_items.id` (when they were added).
+- A line is **available** when the product is active and `stock >= quantity`. `problem` is `null` for available lines, otherwise `"No longer available"` (inactive), `"Out of stock"` (stock 0) or `"Only N left"` (stock above 0 but below the quantity), checked in that order.
+- `item_count` is the total quantity of ALL lines (also lines with problems). `subtotal` adds only available lines. `has_problems` is true if any line is unavailable.
+- No cart row yet: `{"items": [], "item_count": 0, "subtotal": 0, "has_problems": false}` and no row is created.
+- **`GET /cart` and `GET /cart/count` never modify data.** A problem is only reported; lines are never removed or corrected automatically. The cart items and their products are loaded in one query (`joinedload(CartItem.product)`; checked: 1 query for 3 lines).
+- `POST` and `PATCH` return `{"product_id", "quantity" (new quantity of that line), "item_count" (cart total)}`.
+
+### Quantity limit
+
+The most of one product in a cart is `min(stock, MAX_QUANTITY_PER_PRODUCT)`, where `MAX_QUANTITY_PER_PRODUCT = 10` (top of `cart_service.py`). Above it: 409 `"Maximum quantity for this product is N"`, or 409 `"Out of stock"` when the limit is 0. A refused request leaves the cart exactly as it was. The cart is **not** a stock reservation: stock is only reserved at checkout.
+
+The request bodies check `quantity` 1 to 10 with a literal `10` in `schemas/cart.py` (a schema should not import from a service). Keep the two in sync. `product_id` (body and path) must be 1 to 2147483647 (the database integer limit; a bigger number would be a 500), otherwise 422.
+
+### Atomic upserts (and why)
+
+Two requests at the same moment (a double click, two tabs) must never create two carts, fail with a unique error, or lose a quantity. So there is no check-then-insert:
+
+1. `INSERT INTO carts ... ON CONFLICT (user_id) DO NOTHING`, then `SELECT id` (`cart_repository.get_or_create_cart_id`).
+2. `INSERT INTO cart_items ... ON CONFLICT ON CONSTRAINT uq_cart_items_cart_id_product_id DO UPDATE SET quantity = cart_items.quantity + excluded.quantity RETURNING quantity` (`cart_repository.upsert_cart_item`). The old quantity is never read first.
+
+The service then compares the returned quantity with the limit; if it is too high it calls `db.rollback()` (this also removes a cart row that was created by the same request) and raises 409. PATCH checks the limit **before** changing anything. Both use the dialect `insert` from `sqlalchemy.dialects.postgresql`. The service owns the transaction; the repository never commits.
+
+DELETE of a line or of the whole cart is one `DELETE ... WHERE cart_id IN (SELECT id FROM carts WHERE user_id = ...)`, so another user's cart can never be touched.
+
+### The `next` redirect rule (login and register)
+
+`api.js` sends a logged-out visitor on a `data-requires-login="true"` page to `/login.html?next=<encodeURIComponent(pathname + search)>`. The product page's "Log in to add to cart" link uses the same format. After a successful login or registration, `login.js` and `register.js` read `next` and use it **only if** it starts with `/`, does not start with `//`, contains no backslash and (added in M6) contains no control character. Otherwise they go to `/`. The check is written inline in each file. The control-character test closes a hole: `next=/%09/evil.com` decodes to `/<tab>/evil.com`, and browsers delete the tab, which leaves `//evil.com`. The register page has no link that carries `next` from the login page yet (not asked), so `next` only works there when it is typed into the URL.
+
+### Badge rule
+
+The element is `<span id="cart-count" class="cart-badge">` inside the Cart link, created by `layout.js` for **customers only** (hidden until known). `layout.js` fills it from `GET /cart/count` after `GET /users/me`; if that call fails there is no badge and no error. `cart.js` (from `item_count`) and `product.js` (from the POST answer) update it with `document.getElementById("cart-count")` and **only if the element exists** (the navbar fills in after an async call, so it may not exist yet). The badge text is the number and it is hidden when the number is 0.
+
+### Product page buy area
+
+Decided in this order: seller or admin gives "Use a customer account to buy products." (any stock); stock 0 shows nothing extra (the "Out of stock" status is enough, also when logged out); logged out shows "Log in to add to cart"; a customer gets a quantity dropdown (1 to `min(stock, 10)`) and "Add to Cart". The role comes from one `GET /users/me` call on the page; any failure counts as logged out. Messages: "Added to cart" with a "Go to cart" link, or the API's error text.
+
+### Cart page
+
+Each line: image (linked, one-time placeholder fallback), name (linked), unit price, quantity dropdown (1 to `min(stock, 10)`; if the quantity is above that, a disabled first option shows it and stays selected; no dropdown when the limit is 0), line total, Remove. Lines with a problem have a lighter background and the problem in red. Changing the dropdown calls PATCH, Remove calls DELETE, Clear cart calls `DELETE /cart` after `confirm()`; each then calls `loadCart()` again, **also after an error** (the error stays in the message area above the list and the list is refreshed, so a stale page fixes itself). The controls of the line are disabled while its request runs. There is no checkout button yet. A seller or admin who opens `/cart.html` by hand sees "Could not load your cart: Customer access required" (their navbar has no Cart link).
+
+## Notes for M7 (checkout and orders)
+
+- **The cart does not reserve stock.** Checkout stage 1 must re-check everything inside its transaction with `SELECT ... FOR UPDATE` on the product rows (as CLAUDE.md says), not trust the cart numbers.
+- **Checkout must refuse to continue when the cart has a problem** (the same rules as `has_problems`: inactive product, or stock below the quantity). Also refuse an empty cart. The cart-reading code is in `cart_service.get_cart` (inline, not shared), so M7 will repeat the rules with the locked rows.
+- **The cart is cleared at the end of stage 1** (same transaction as the order). Use `cart_repository.delete_all_cart_items`; the cart row stays.
+- **`order_items` must snapshot `product_name` and `unit_price` at that moment** (the cart stores no price; use the locked product row).
+- **The checkout page must set `data-requires-login="true"`** on `<body>`. The cart page has no checkout button; M7 adds it.
+- **The address form UI is built in M7** (the API for addresses exists since M2; the orders table copies the address).
+- **M7 needs a concurrency test with real committed data** (two buyers, last item). The current `client` fixture already commits for real and truncates after the test, but the `db_session` fixture rolls everything back, so a concurrency test must use the `client` style fixtures (separate sessions or threads, each committing) and not `db_session`. Plan a fixture for that.
+- `product_repository.get_product_by_id` loads category and seller with outer joins; `SELECT ... FOR UPDATE` on that query would also try to lock the joined rows (Postgres refuses `FOR UPDATE` with an outer join), so M7 needs its own locking query (for example `with_for_update(of=Product)` without the joins).
+
+## Key design decisions (M6)
+
+- **Decisions CLAUDE.md and the milestone did not cover:**
+  - `product_id` has an upper limit of 2147483647 in the body and in the paths (422 above), like the price limits in M5.
+  - The `next` check also rejects control characters (see above).
+  - On PATCH, if the product is inactive the "no longer available" 409 comes before the limit check. If the limit is 0 the limit message is "Out of stock".
+  - The 404 for a line that is not in the cart says `"Product is not in your cart"`.
+  - `quantity` in the PATCH/POST body is validated by Pydantic (422); the max in the service is the only place that knows the stock-based limit.
+  - One shared `.button-secondary` style (Remove, Clear cart) and one `.quantity-select` style (product page and cart page).
+  - "Subtotal (1 item)" uses the singular for one item.
+- Tests: `tests/test_cart.py` has its own small fixtures (`shop`: seller, category, a logged-in customer and a `product()` maker; `change_product`; `table_snapshot`). Each test builds its own data; nothing uses the seed.
+- Tested by hand in headless Chrome (driven over the DevTools protocol): logged-out product page and `/cart.html` redirect, garbage token on a public page (still loads, token removed), login with `next`, five open-redirect attempts (all go to `/`), add from the product page, the stock-1 product (dropdown offers only 1, second add shows the 409 message), badge updates, quantity change, problems ("Only 3 left" with a disabled option, "No longer available"), remove, clear, seller/admin views, stock-0 product, 360px wide (no horizontal scroll). The only console errors are the browser's own logs of expected 401/403/409 responses. The dev database was restored afterwards.
 
 ## Key design decisions (M5)
 

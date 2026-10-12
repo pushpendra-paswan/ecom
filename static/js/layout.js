@@ -101,7 +101,33 @@ async function showLayout() {
     localStorage.removeItem("access_token");
     window.location.reload();
   });
+  // Only customers have a cart: a Cart link with a badge (hidden until the count is known)
+  if (user.role === "customer") {
+    const cartLink = document.createElement("a");
+    cartLink.className = "cart-link";
+    cartLink.href = "/cart.html";
+    cartLink.append("Cart");
+    const cartBadge = document.createElement("span");
+    cartBadge.id = "cart-count";
+    cartBadge.className = "cart-badge";
+    cartBadge.hidden = true;
+    cartLink.append(cartBadge);
+    userArea.append(cartLink);
+  }
+
   userArea.append(greeting, logoutButton);
+
+  // Fill the badge with the number of items in the cart. If this fails, show no badge and no error.
+  if (user.role === "customer") {
+    try {
+      const cartCount = await apiRequest("/cart/count", "GET");
+      const cartBadge = document.getElementById("cart-count");
+      cartBadge.textContent = String(cartCount.item_count);
+      cartBadge.hidden = cartCount.item_count === 0;
+    } catch (error) {
+      // No badge
+    }
+  }
 }
 
 showLayout();

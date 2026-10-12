@@ -6,6 +6,7 @@ def test_frontend_files_are_served(client):
         "/product.html",
         "/login.html",
         "/register.html",
+        "/cart.html",
         "/static/css/style.css",
         "/static/js/api.js",
         "/static/js/layout.js",
@@ -13,6 +14,7 @@ def test_frontend_files_are_served(client):
         "/static/js/home.js",
         "/static/js/products.js",
         "/static/js/product.js",
+        "/static/js/cart.js",
         "/static/images/placeholder.svg",
     ]
 

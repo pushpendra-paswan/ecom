@@ -40,7 +40,9 @@ async function apiRequest(path, method, body) {
   if (response.status === 401 && path !== "/auth/login") {
     localStorage.removeItem("access_token");
     if (document.body.getAttribute("data-requires-login") === "true") {
-      window.location.href = "/login.html";
+      // Come back to this page after logging in
+      window.location.href =
+        "/login.html?next=" + encodeURIComponent(window.location.pathname + window.location.search);
     }
     throw new Error("Please log in again");
   }

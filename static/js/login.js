@@ -18,9 +18,17 @@ loginForm.addEventListener("submit", async function (event) {
       password: document.getElementById("password").value,
     });
 
-    // Remember the token and go to the home page
+    // Remember the token
     localStorage.setItem("access_token", result.access_token);
-    window.location.href = "/";
+
+    // Go back to the page in the "next" parameter. Only a path on this site is allowed
+    // (starts with "/", not "//", no backslash, no control characters such as a tab, which
+    // browsers remove from URLs), otherwise this would be an open redirect.
+    let nextPath = new URLSearchParams(window.location.search).get("next");
+    if (nextPath === null || !nextPath.startsWith("/") || nextPath.startsWith("//") || nextPath.includes("\\") || /[\u0000-\u001f]/.test(nextPath)) {
+      nextPath = "/";
+    }
+    window.location.href = nextPath;
   } catch (error) {
     // Show the error and let the user try again
     errorMessage.textContent = error.message;

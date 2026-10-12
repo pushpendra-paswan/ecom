@@ -107,10 +107,93 @@ async function loadProductPage() {
   description.className = "product-description";
   description.textContent = product.description;
 
+  // Find out who is looking at the page (only if there is a token). Any failure means logged out.
+  let user = null;
+  if (localStorage.getItem("access_token")) {
+    try {
+      user = await apiRequest("/users/me", "GET");
+    } catch (error) {
+      user = null;
+    }
+  }
+
+  // The buy area depends on the visitor
+  const purchaseArea = document.createElement("div");
+  purchaseArea.className = "purchase-area";
+  if (user !== null && user.role !== "customer") {
+    // Sellers and admins cannot buy
+    const customerOnlyText = document.createElement("p");
+    customerOnlyText.textContent = "Use a customer account to buy products.";
+    purchaseArea.append(customerOnlyText);
+  } else if (product.stock > 0 && user === null) {
+    // Logged out: log in first, then come back to this page
+    const loginLink = document.createElement("a");
+    loginLink.href =
+      "/login.html?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+    loginLink.textContent = "Log in to add to cart";
+    purchaseArea.append(loginLink);
+  } else if (product.stock > 0) {
+    // A customer: quantity dropdown (1 to the smaller of the stock and 10) and the button
+    const quantitySelect = document.createElement("select");
+    quantitySelect.className = "quantity-select";
+    quantitySelect.setAttribute("aria-label", "Quantity");
+    for (let option = 1; option <= Math.min(product.stock, 10); option++) {
+      const optionElement = document.createElement("option");
+      optionElement.value = String(option);
+      optionElement.textContent = String(option);
+      quantitySelect.append(optionElement);
+    }
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.textContent = "Add to Cart";
+    const purchaseControls = document.createElement("div");
+    purchaseControls.className = "purchase-controls";
+    purchaseControls.append(quantitySelect, addButton);
+
+    // Success and error messages appear here
+    const purchaseMessage = document.createElement("p");
+    purchaseMessage.className = "purchase-message";
+    purchaseMessage.setAttribute("aria-live", "polite");
+
+    addButton.addEventListener("click", async function () {
+      // Disable the button while the request runs
+      addButton.disabled = true;
+      purchaseMessage.textContent = "";
+      purchaseMessage.className = "purchase-message";
+      try {
+        const result = await apiRequest("/cart/items", "POST", {
+          product_id: product.id,
+          quantity: Number(quantitySelect.value),
+        });
+
+        // Show "Added to cart" with a link to the cart
+        const goToCartLink = document.createElement("a");
+        goToCartLink.href = "/cart.html";
+        goToCartLink.textContent = "Go to cart";
+        purchaseMessage.className = "purchase-message purchase-message-success";
+        purchaseMessage.append("Added to cart. ", goToCartLink);
+
+        // Update the navbar badge, if it exists yet
+        const cartBadge = document.getElementById("cart-count");
+        if (cartBadge) {
+          cartBadge.textContent = String(result.item_count);
+          cartBadge.hidden = result.item_count === 0;
+        }
+      } catch (error) {
+        // Show the message from the API, for example the 409 "Maximum quantity..." message
+        purchaseMessage.className = "purchase-message purchase-message-error";
+        purchaseMessage.textContent = error.message;
+      }
+      addButton.disabled = false;
+    });
+
+    purchaseArea.append(purchaseControls, purchaseMessage);
+  }
+
   // Put everything on the page
   const info = document.createElement("div");
   info.className = "product-detail-info";
-  info.append(name, categoryLine, sellerLine, price, stockStatus, description);
+  info.append(name, categoryLine, sellerLine, price, stockStatus, purchaseArea, description);
 
   const detail = document.createElement("div");
   detail.className = "product-detail";

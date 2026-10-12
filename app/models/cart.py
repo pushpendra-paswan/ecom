@@ -34,3 +34,6 @@ class CartItem(Base):
     )
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # The product of this line (used to read the current price and stock)
+    product: Mapped["Product"] = relationship()
