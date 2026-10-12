@@ -4,15 +4,16 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.db import get_db
 from app.main import app
+from app.models.cart import Cart, CartItem
 from app.models.catalog import Category, Product
-from app.models.user import User
+from app.models.user import Address, User
 
 
 @pytest.fixture(scope="session")
@@ -181,3 +182,58 @@ def create_product(test_engine):
             return product.id
 
     return create
+
+
+@pytest.fixture
+def committed_data(test_engine, create_user, create_category, create_product):
+    # For the concurrency tests: real, committed data made with separate sessions, because several
+    # threads (each with its own session and connection) must be able to see it.
+    class CommittedData:
+        def customer(self, email):
+            # A customer with one address; returns (user_id, address_id)
+            user_id = create_user(email)
+            with Session(test_engine) as session:
+                address = Address(
+                    user_id=user_id,
+                    full_name="Test customer",
+                    phone="9876543210",
+                    line1="1 Test Road",
+                    city="Pune",
+                    state="Maharashtra",
+                    postal_code="411001",
+                    country="India",
+                    is_default=True,
+                )
+                session.add(address)
+                session.commit()
+                return user_id, address.id
+
+        def products(self, count, stock, price=10000):
+            # Several products of one new seller and category; returns their ids in creation order
+            seller_id = create_user("seller@example.com", role="seller")
+            category_id = create_category("Concurrency")
+            product_ids = []
+            for number in range(count):
+                product_ids.append(
+                    create_product(
+                        seller_id, category_id, name="Product " + str(number + 1), price=price, stock=stock
+                    )
+                )
+            return product_ids
+
+        def put_in_cart(self, user_id, product_id, quantity):
+            # Add one line to the user's cart (the cart row is created if needed)
+            with Session(test_engine) as session:
+                cart = session.execute(select(Cart).where(Cart.user_id == user_id)).scalar_one_or_none()
+                if cart is None:
+                    cart = Cart(user_id=user_id)
+                    session.add(cart)
+                    session.flush()
+                session.add(CartItem(cart_id=cart.id, product_id=product_id, quantity=quantity))
+                session.commit()
+
+    yield CommittedData()
+
+    # Always remove everything, even when the test failed (CASCADE empties every table that points to these)
+    with test_engine.begin() as connection:
+        connection.execute(text("TRUNCATE users, categories RESTART IDENTITY CASCADE"))

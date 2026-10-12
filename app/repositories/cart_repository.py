@@ -73,3 +73,10 @@ def delete_all_cart_items(db: Session, user_id: int):
     # Remove every line of this user's cart. The cart row stays.
     users_cart = select(Cart.id).where(Cart.user_id == user_id)
     db.execute(delete(CartItem).where(CartItem.cart_id.in_(users_cart)))
+
+
+def lock_cart(db: Session, user_id: int):
+    # Lock this user's cart row until the transaction ends (SELECT ... FOR UPDATE).
+    # A second checkout of the same user waits here. Returns the cart id, or None if there is no cart row.
+    query = select(Cart.id).where(Cart.user_id == user_id).with_for_update()
+    return db.execute(query).scalar_one_or_none()

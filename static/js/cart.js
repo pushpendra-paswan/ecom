@@ -183,6 +183,21 @@ async function loadCart() {
     problemsNote.textContent = "Some items need your attention. They are not included in the subtotal.";
     summary.append(problemsNote);
   }
+
+  // "Proceed to checkout": a link (the cart is not empty here). With problems it is plain text, not a link.
+  if (cart.has_problems) {
+    const checkoutDisabled = document.createElement("p");
+    checkoutDisabled.className = "checkout-link-disabled";
+    checkoutDisabled.textContent = "Proceed to checkout";
+    summary.append(checkoutDisabled);
+  } else {
+    const checkoutLink = document.createElement("a");
+    checkoutLink.className = "button checkout-link";
+    checkoutLink.href = "/checkout.html";
+    checkoutLink.textContent = "Proceed to checkout";
+    summary.append(checkoutLink);
+  }
+
   const clearButton = document.createElement("button");
   clearButton.type = "button";
   clearButton.className = "button-secondary";

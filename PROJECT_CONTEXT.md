@@ -14,7 +14,7 @@ An Amazon-style e-commerce web app, built for learning the full web flow from br
 - Dev environment: Docker Compose (`app` and `db`)
 - Password hashing: `bcrypt` (used directly, no wrapper)
 - Tokens: `PyJWT` (HS256). Email validation: `email-validator` (used by Pydantic `EmailStr`)
-- Not installed yet (later milestones): `stripe`
+- Payments: `stripe` 16.0.0 (Python SDK, test mode only; added in M7)
 
 Pinned versions are in `requirements.txt`.
 
@@ -27,18 +27,18 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── db.py              # engine, SessionLocal, Base, get_db
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
-│   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py
-│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py
-│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py
-│   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py
+│   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py, order.py
+│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py, orders.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py
+│   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py, order_repository.py
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
 ├── alembic/               # env.py, script.py.mako, versions/ (two migrations: initial schema, M5 search)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
-├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_frontend_files.py
+├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -70,7 +70,7 @@ docker compose exec app pytest
 
 Tests use `TEST_DATABASE_URL` (database `ecommerce_test`). `tests/conftest.py` creates that database if missing, then runs `alembic downgrade base` and `alembic upgrade head` on it once per test session (so the migration itself is tested). It refuses to run if the test and dev database names are the same.
 
-Two fixtures:
+Fixtures:
 - `db_session`: a session inside an outer transaction that is rolled back after every test (savepoint mode, so a failed statement inside `pytest.raises(IntegrityError)` does not break the test). Use this for model and repository/service tests.
 - `client`: a `TestClient` whose `get_db` is overridden to use the test database. It commits for real, so after every test it runs `TRUNCATE users, categories RESTART IDENTITY CASCADE` (this empties every table). The test database is never seeded.
 
@@ -78,6 +78,7 @@ Helper fixtures in `conftest.py` (M2, M3):
 - `create_user(email, role="customer", is_active=True, password="Password@123")`: inserts a user directly into the test database (fast bcrypt rounds) and returns the user id.
 - `auth_headers(email, password="Password@123")`: logs in through `/auth/login` and returns `{"Authorization": "Bearer ..."}`.
 - `create_category(name, slug=None)` (M3): inserts a category directly and returns its id. The slug defaults to the lowercased name with spaces turned into hyphens.
+- `committed_data` (M7, used only by `tests/test_checkout_concurrency.py`): methods `customer(email)` (a customer with one address, returns `(user_id, address_id)`), `products(count, stock, price=10000)` (a seller, a category and several products, returns the ids) and `put_in_cart(user_id, product_id, quantity)`. Everything is committed with its own sessions, so several threads can see it. The fixture ends with `TRUNCATE users, categories RESTART IDENTITY CASCADE`, which runs even when the test fails.
 - `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None, description="A test product")` (M3, `description` added in M5): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
 ## Completed milestones
@@ -89,10 +90,11 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M4: Storefront frontend.** Shared navbar and footer (`layout.js`), home page, product listing page, product detail page, one product card function, one stylesheet, placeholder image. Read-only: no search, no cart. No backend or schema change. 57 tests passing (one new test that checks the frontend files are served).
 - **M5: Search, filter, sort and indexes.** `GET /products` takes `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`, `page_size`. Postgres full-text search (generated `search_vector` column + GIN index), one extra partial index for the newest-first listing, the products page with a filter sidebar, a navbar search box, before/after measurements (see "Search (M5)"). One migration (`099593dc45a9`). 91 tests passing (34 new in `tests/test_search.py`).
 - **M6: Cart.** Customer-only cart API (`/cart`, `/cart/count`, `/cart/items`), atomic upserts, per-line problem reporting, cart page, navbar Cart link with badge, Add to Cart on the product page, `?next=` login redirect. No schema change (no new migration; only the `CartItem.product` relationship was added). 109 tests passing (18 new in `tests/test_cart.py`).
+- **M7: Checkout and orders.** `POST /orders/checkout` (two stages: one locked database transaction, then the Stripe Checkout Session), order history (`GET /orders`, `GET /orders/{id}`), checkout, addresses, orders, order detail, success and cancelled pages, navbar links "My Orders" and "Addresses", "Proceed to checkout" on the cart page. `stripe==16.0.0` added. No schema change (no new migration). 124 tests passing (12 new in `tests/test_checkout.py`, 3 in `tests/test_checkout_concurrency.py`, plus the frontend file test now covers the new pages).
 
 ## Pending milestones
 
-M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -177,7 +179,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M6)
+## API endpoints (as of M7)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -207,10 +209,13 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | PATCH `/cart/items/{product_id}` | customer only | Body `{quantity (1 to 10)}`. Sets the exact quantity. Not in the cart: 404. Inactive product or over the limit: 409 |
 | DELETE `/cart/items/{product_id}` | customer only | Always 204, even if the line was not there |
 | DELETE `/cart` | customer only | Removes all lines, always 204. The cart row stays |
+| POST `/orders/checkout` | customer only | Returns 201 `{order_id, checkout_url, total_amount}`. Body `{address_id}` only. See "Checkout and orders (M7)" |
+| GET `/orders` | customer only | Paginated, the caller's orders, newest first (`created_at DESC, id DESC`). Each item: `id, status, total_amount, created_at, item_count, items[{product_id, product_name, unit_price, quantity}]` |
+| GET `/orders/{order_id}` | customer only | `id, status, total_amount, created_at, shipping_address{...}, items[{..., line_total}], payment{status, amount, currency}`. Someone else's or a missing order: 404 `"Order not found"`. A non-numeric id: 422 |
 
-All cart endpoints: no token gives 401, a seller or admin gives 403 (`require_customer`).
+All cart and order endpoints: no token gives 401, a seller or admin gives 403 (`require_customer`).
 
-The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html` and `/register.html` and everything under `/static` are public files (`/cart.html` itself is only an HTML shell; its data comes from `GET /cart`, which needs a customer token).
+The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html`, `/register.html`, `/addresses.html`, `/checkout.html`, `/orders.html`, `/order.html`, `/order-success.html`, `/order-cancelled.html` and everything under `/static` are public files. The pages that need a login are only HTML shells; their data comes from API endpoints that need a token.
 
 ## Auth flow (M2)
 
@@ -238,6 +243,8 @@ List endpoints take `page` (default 1, minimum 1) and `page_size` (default 20, b
 |---|---|---|
 | `JWT_SECRET` | none, **required** | Signing key. Generate with `openssl rand -hex 32`. The app refuses to start if it is empty |
 | `JWT_EXPIRE_MINUTES` | 60 | Token lifetime |
+
+Stripe settings (read in `app/core/config.py`, used since M7): `STRIPE_SECRET_KEY` (must start with `sk_test_`; empty gives 503 "Payments are not configured" and any other prefix gives 503 "Only Stripe test keys are allowed", both before any database work), `STRIPE_WEBHOOK_SECRET` (used in M8), `STRIPE_CURRENCY` (default `inr`), `FRONTEND_BASE_URL` (default `http://localhost:8000`, used for the Stripe success and cancel URLs).
 
 The algorithm (HS256) is written inline where the token is created and decoded. The local `.env` has a generated dev secret; `.env.example` has it empty with a note.
 
@@ -288,18 +295,30 @@ The seller's email and every other private field are never returned. Lists are w
 | `/products.html` | `q`, `category`, `min_price`, `max_price`, `in_stock`, `sort`, `page`. **Prices in the page URL are in RUPEES** (see "Search (M5)"). `page` defaults to 1; anything below 1 or not a number becomes 1 | `frontend/products.html`, `products.js` |
 | `/product.html` | `id` (positive whole number; anything else shows "Product not found" without calling the API) | `frontend/product.html`, `product.js` |
 | `/cart.html` | none. `<body data-requires-login="true">` | `frontend/cart.html`, `cart.js` |
+| `/addresses.html` | `next` (optional, same safety rule as login; only used after a successful ADD). `<body data-requires-login="true">` | `frontend/addresses.html`, `addresses.js` |
+| `/checkout.html` | none. Login required | `frontend/checkout.html`, `checkout.js` |
+| `/order-success.html` | `order_id` (positive whole number, otherwise "Order not found" and no API call). Login required | `frontend/order-success.html`, `order-success.js` |
+| `/order-cancelled.html` | `order_id` (optional, only used for a link). Login required | `frontend/order-cancelled.html`, `order-cancelled.js` |
+| `/orders.html` | `page` (default 1). Login required | `frontend/orders.html`, `orders.js` |
+| `/order.html` | `id` (positive whole number, otherwise "Order not found" and no API call). Login required | `frontend/order.html`, `order.js` |
 | `/login.html` | `next` (optional, see "Cart (M6)") | `frontend/login.html`, `login.js` |
 | `/register.html` | `next` (optional, same rule) | `frontend/register.html`, `register.js` |
 
 | Script (`static/js/`) | What it does |
 |---|---|
 | `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html?next=...` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
-| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads. For a **customer** it also adds a "Cart" link with the badge `<span id="cart-count">` and fills it from `GET /cart/count` (M6) |
+| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads. For a **customer** it also adds a "Cart" link with the badge `<span id="cart-count">` and fills it from `GET /cart/count` (M6), and (M7) "My Orders" and "Addresses" links. Sellers and admins get none of them |
 | `product-card.js` | `buildProductCard(product)`: returns the `<a>` card used by the home and listing pages (image with one-time placeholder fallback, name, price, "Out of stock" label) |
 | `home.js` | Category cards (`GET /categories`) and the 8 newest products (`GET /products?page=1&page_size=8`) |
 | `products.js` | Sidebar (category links, filter form), heading, total count, product grid (20 per page) and Previous/Next links. Converts rupees from the URL to paise for the API (M5) |
 | `product.js` | Product detail (image, name, category link, seller, price, stock status, buy area, description). M6: calls `GET /users/me` once (if a token exists) and shows the buy area, see "Cart (M6)" |
-| `cart.js` | M6: one function `loadCart()` fetches `GET /cart` and draws the whole cart page. Called on page load and after every change |
+| `cart.js` | M6: one function `loadCart()` fetches `GET /cart` and draws the whole cart page. Called on page load and after every change. M7: a "Proceed to checkout" link to `/checkout.html` in the summary box (plain text instead of a link when `has_problems`; an empty cart shows no summary at all) |
+| `addresses.js` | M7: `loadAddressesPage()`: address cards with a "Default" label, one form for add and edit, delete (after `confirm()`), "Make default" (a full PUT with `is_default: true`). After a successful ADD it goes to `next` if `next` passes the login.js safety check (written inline) |
+| `checkout.js` | M7: loads `GET /cart` and `GET /users/me/addresses`, shows a read-only summary and the address radio buttons (default preselected), and the "Place order and pay" button. An empty cart shows a message and no button; `has_problems` and "no address" disable the button. The redirect goes only to a URL that starts with `https://checkout.stripe.com/`. After an error the button comes back only for a 502 or a network failure |
+| `order-success.js` | M7: checks `GET /orders/{id}` up to 15 times, 2 seconds apart, while the status is `pending_payment`. Says "Payment received. Thank you!" only when the API status is `paid` (or later `shipped`/`delivered`), "This order was cancelled." for `cancelled`, otherwise "We are still confirming your payment. Check My Orders in a moment." Arriving on the page never counts as proof of payment |
+| `order-cancelled.js` | M7: the static message plus links (the order, My Orders, products) |
+| `orders.js` | M7: My Orders, 10 per page, order cards with the first 3 items, Previous/Next links |
+| `order.js` | M7: order detail (address, items table, total, payment status). Holds its own status label objects (one for the order, one for the payment) |
 | `login.js`, `register.js` | The two forms (from M2). M6: after success they go to the `next` page (rule below) instead of always `/` |
 
 `static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, products page sidebar, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
@@ -534,18 +553,105 @@ Decided in this order: seller or admin gives "Use a customer account to buy prod
 
 ### Cart page
 
-Each line: image (linked, one-time placeholder fallback), name (linked), unit price, quantity dropdown (1 to `min(stock, 10)`; if the quantity is above that, a disabled first option shows it and stays selected; no dropdown when the limit is 0), line total, Remove. Lines with a problem have a lighter background and the problem in red. Changing the dropdown calls PATCH, Remove calls DELETE, Clear cart calls `DELETE /cart` after `confirm()`; each then calls `loadCart()` again, **also after an error** (the error stays in the message area above the list and the list is refreshed, so a stale page fixes itself). The controls of the line are disabled while its request runs. There is no checkout button yet. A seller or admin who opens `/cart.html` by hand sees "Could not load your cart: Customer access required" (their navbar has no Cart link).
+Each line: image (linked, one-time placeholder fallback), name (linked), unit price, quantity dropdown (1 to `min(stock, 10)`; if the quantity is above that, a disabled first option shows it and stays selected; no dropdown when the limit is 0), line total, Remove. Lines with a problem have a lighter background and the problem in red. Changing the dropdown calls PATCH, Remove calls DELETE, Clear cart calls `DELETE /cart` after `confirm()`; each then calls `loadCart()` again, **also after an error** (the error stays in the message area above the list and the list is refreshed, so a stale page fixes itself). The controls of the line are disabled while its request runs. The summary box has a "Proceed to checkout" link (M7). A seller or admin who opens `/cart.html` by hand sees "Could not load your cart: Customer access required" (their navbar has no Cart link).
 
-## Notes for M7 (checkout and orders)
+## Checkout and orders (M7)
 
-- **The cart does not reserve stock.** Checkout stage 1 must re-check everything inside its transaction with `SELECT ... FOR UPDATE` on the product rows (as CLAUDE.md says), not trust the cart numbers.
-- **Checkout must refuse to continue when the cart has a problem** (the same rules as `has_problems`: inactive product, or stock below the quantity). Also refuse an empty cart. The cart-reading code is in `cart_service.get_cart` (inline, not shared), so M7 will repeat the rules with the locked rows.
-- **The cart is cleared at the end of stage 1** (same transaction as the order). Use `cart_repository.delete_all_cart_items`; the cart row stays.
-- **`order_items` must snapshot `product_name` and `unit_price` at that moment** (the cart stores no price; use the locked product row).
-- **The checkout page must set `data-requires-login="true"`** on `<body>`. The cart page has no checkout button; M7 adds it.
-- **The address form UI is built in M7** (the API for addresses exists since M2; the orders table copies the address).
-- **M7 needs a concurrency test with real committed data** (two buyers, last item). The current `client` fixture already commits for real and truncates after the test, but the `db_session` fixture rolls everything back, so a concurrency test must use the `client` style fixtures (separate sessions or threads, each committing) and not `db_session`. Plan a fixture for that.
-- `product_repository.get_product_by_id` loads category and seller with outer joins; `SELECT ... FOR UPDATE` on that query would also try to lock the joined rows (Postgres refuses `FOR UPDATE` with an outer join), so M7 needs its own locking query (for example `with_for_update(of=Product)` without the joins).
+### The checkout flow (`app/services/checkout_service.py`, function `checkout`)
+
+`POST /orders/checkout` takes only `{address_id}` (1 to 2147483647). Items, prices and amounts always come from the server. It is plain sequential code, steps a to n in order. `CHECKOUT_SESSION_MINUTES = 30` is the constant at the top of the file.
+
+Before any database work: `STRIPE_SECRET_KEY` empty gives 503 "Payments are not configured"; a key that does not start with `sk_test_` gives 503 "Only Stripe test keys are allowed".
+
+**Stage 1: one database transaction** (default READ COMMITTED, isolation level not changed)
+
+| Step | What | Result if it fails |
+|---|---|---|
+| a | Load the address where `id = address_id AND user_id = me` | 404 "Address not found" |
+| b | `SELECT ... FOR UPDATE` on the user's cart row (`cart_repository.lock_cart`) | no cart row: 400 "Your cart is empty" |
+| c | Load the cart items | none: 400 "Your cart is empty" |
+| d | Lock the product rows of those items with ONE query, `WHERE id IN (...) ORDER BY id FOR UPDATE` (`product_repository.lock_products`) | |
+| e | Check every line against the locked rows: active, and stock at least the quantity. Collect ALL problems | 409 with one message such as `"Pen: out of stock; Book: only 3 left"` (`"<name>: no longer available"`, `"<name>: out of stock"`, `"<name>: only N left"`). Rollback, nothing changed |
+| f | Line prices from the locked product rows, `total_amount = sum(unit_price * quantity)` | |
+| g | Create the order (`pending_payment`) with the shipping fields copied from the address | |
+| h | Create the order items (snapshot of `product_name` and `unit_price`) | |
+| i | `product.stock = product.stock - quantity` for each line (the CHECK `stock >= 0` is only a backstop) | |
+| j | Create the payment: `amount = total_amount`, `currency = STRIPE_CURRENCY`, `status = pending` | |
+| k | Delete the cart items (the cart row stays) | |
+| l | **Commit.** No lock is held after this | |
+
+**Stage 2: after the commit, no database lock held**
+
+| Step | What |
+|---|---|
+| m | `stripe.checkout.Session.create(...)`, see "Stripe session settings" |
+| n | A second small transaction saves `payments.stripe_checkout_session_id`. The payment intent id is NOT saved here (M8 does it). Returns 201 `{order_id, checkout_url (the session url), total_amount}` |
+
+**Lock order and why.** Always the cart row first, then the product rows in ascending id order, in stage 1 and in the failure path. The cart lock makes a double click or two tabs of the same user safe: the second request waits, then finds an empty cart (400). Locking all products in ascending id order with one query means two checkouts with overlapping products can never wait for each other in a circle (no deadlock). Two buyers of the last item: the second one waits for the product lock, then re-reads the stock (0) and gets 409. `lock_products` uses `populate_existing`, because the cart items were loaded with their products before the lock (step c) and SQLAlchemy would otherwise keep those stale numbers instead of the freshly locked ones.
+
+**Why the Stripe call is outside the transaction.** A database transaction must never stay open during a network call. Stripe can take seconds (or hang up to the 10 second timeout), and the open transaction would hold the cart and product locks that whole time, blocking every other buyer of those products.
+
+**Failure path.** If the Stripe call raises `stripe.StripeError` (the base class of all Stripe errors in SDK 16.0.0), ONE cancellation transaction runs: lock the cart row, lock the product rows (same order), set the order to `cancelled`, set the payment to `failed`, add the quantities back to the stock, and put the order's items back into the cart (the same atomic upsert as the cart API, so a product the customer added again in the meantime gets the quantities added together; this can pass the usual limit of 10 in that rare case). The answer is 502 "Payment service is unavailable. Your cart has not been changed. Please try again." The Stripe error text is not sent to the client and nothing is logged.
+
+### Stripe session settings
+
+`mode="payment"`; one line item per order item (`price_data`: `currency` from settings, `unit_amount` = the snapshot `unit_price`, `product_data.name` = the snapshot name; `quantity`); `client_reference_id=str(order_id)`; `metadata={"order_id": str(order_id)}`; `customer_email` = the user's email; `success_url = FRONTEND_BASE_URL + "/order-success.html?order_id=<id>"`; `cancel_url = FRONTEND_BASE_URL + "/order-cancelled.html?order_id=<id>"`; `idempotency_key="order-<id>"`; `api_key=settings.STRIPE_SECRET_KEY` (passed on the call, no global key); `expires_at` = now + 30 minutes + 60 seconds (integer Unix timestamp, see decisions). The 10 second network timeout is set inline with `stripe.default_http_client = stripe.RequestsClient(timeout=10)`: in SDK 16.0.0 the timeout belongs to the HTTP client, not to the call. The SDK's default of 2 automatic retries on network errors stays on; it is safe because of the idempotency key.
+
+### What is written at checkout
+
+| Table | Fields |
+|---|---|
+| `orders` | `user_id`, `status = pending_payment`, `total_amount`, `shipping_full_name`, `shipping_phone`, `shipping_line1`, `shipping_line2`, `shipping_city`, `shipping_state`, `shipping_postal_code`, `shipping_country` (all copied from the address) |
+| `order_items` | `order_id`, `product_id`, `product_name`, `unit_price` (the locked product's price at that moment), `quantity` |
+| `payments` | `order_id`, `amount = total_amount`, `currency = settings.STRIPE_CURRENCY`, `status = pending`, `stripe_checkout_session_id` (set in step n), `stripe_payment_intent_id` stays NULL |
+| `products` | `stock` reduced by the quantities |
+| `cart_items` | all of the user's lines deleted |
+
+On a Stripe failure: `orders.status = cancelled`, `payments.status = failed`, `stripe_checkout_session_id` stays NULL, stock restored, cart lines restored.
+
+Stripe ids (`stripe_checkout_session_id`, `stripe_payment_intent_id`) are never returned by any endpoint.
+
+### Known gaps until M8 and M9
+
+- Orders stay `pending_payment` after the customer pays, until M8 (the success page then ends with "We are still confirming your payment").
+- Unpaid orders keep their stock reserved until M8 releases it when the Stripe session expires (about 31 minutes after checkout).
+- There is no cancel button until M9.
+- The cart is empty after an abandoned payment (the customer has to add the items again; the order is still in My Orders).
+- If the Stripe call times out but Stripe really created the session, the order is cancelled by the failure path while the session can still be paid. M8 should refund or ignore a `checkout.session.completed` event for an order that is not `pending_payment`.
+- If step n (saving the session id) fails after the Stripe session exists, the payment has no session id. M8 must find the payment through `metadata.order_id` as a fallback.
+
+### Notes for M8 (webhooks)
+
+- Find the payment by `stripe_checkout_session_id`; fall back to `metadata.order_id` (stage 2 step n can fail after the Stripe session exists).
+- Only change an order that is still `pending_payment`, so Stripe retries are harmless (idempotent).
+- Store `stripe_payment_intent_id` from the `checkout.session.completed` event.
+- `checkout.session.expired`: cancel the order, restore the stock and mark the payment `failed`, in one transaction. Lock the product rows in ascending id order (and keep "cart row first" if the cart is touched) like checkout does. It does not put items back into the cart.
+- Local testing needs `stripe listen --forward-to localhost:8000/webhooks/stripe` and the `whsec_...` value in `STRIPE_WEBHOOK_SECRET`.
+- Webhook tests send events signed with a test secret and never call the real Stripe API.
+- The success page already polls the order status (15 checks, 2 seconds apart) and only believes the API.
+
+### Notes for M9 (order lifecycle and dashboards)
+
+- Cancelling a `pending_payment` order restores the stock (same lock order as checkout).
+- Cancelling a `paid` order restores the stock and creates a Stripe refund (the payment intent id is saved by M8).
+- Sellers will need an orders view filtered to their own products (`order_items.product_id` joined to `products.seller_id`).
+- The order detail and list pages already show every status label (`pending_payment`, `paid`, `shipped`, `delivered`, `cancelled`).
+
+### Key design decisions (M7)
+
+- **Decisions CLAUDE.md and the milestone did not cover:**
+  - `expires_at` is now + 30 minutes + 60 seconds. Stripe requires at least 30 minutes between creating the session and its expiry, and the request needs a moment to arrive, so exactly 30 minutes could be refused. The tests accept 29 to 31 minutes. The cancelled page's "up to 30 minutes" is therefore a little conservative.
+  - `address_id` and `order_id` have an upper limit of 2147483647 (422 above), like the other ids.
+  - `page` of `GET /orders` has no upper limit (same as the other lists); a gigantic page number would be a 500.
+  - The product lock query uses `populate_existing` (see above). The cart-lock query returns only the cart id.
+  - The failure path locks the cart row first, because putting items back touches `cart_items`, whose foreign key needs a share lock on the cart row; taking the product locks first could deadlock with a second checkout of the same user.
+  - The success page counts `shipped` and `delivered` as "payment received" too (they only come after `paid`), and shows "This order was cancelled." for `cancelled`.
+  - The checkout button comes back after a 502 or a network failure only. After other errors it stays disabled (the page needs a reload or another page).
+  - `api.js` already put the status on the error (M4), so it was not changed.
+  - `STRIPE_SECRET_KEY` is read on every checkout call (not at import time), so the tests can change the setting.
+  - The existing `client` fixture commits for real and truncates afterwards (it does not roll back); the new `tests/test_checkout.py` uses it like `test_cart.py` does. Only `committed_data` is new.
+- **Tests:** Stripe is replaced with `unittest.mock.patch("stripe.checkout.Session.create")` and the key setting is set to `sk_test_dummy` with `monkeypatch`. The concurrency tests call `checkout_service.checkout` directly from threads (each with its own session), lined up with a `threading.Barrier(...)`, and fail if a thread is still alive after 15 seconds. They passed 20 runs in a row. As a check, they all fail when the two `FOR UPDATE` locks are removed.
+- **Tested by hand** with headless Chrome (Playwright from a temporary virtual environment outside the project) and a real `sk_test_` key: a seeded customer adds two products, checks out, lands on the real Stripe page; cancelled page, orders list, detail, success page ending with "still confirming" after about 30 seconds; `<script>` and `<img onerror>` text in an address shows as plain text on the addresses, checkout and order pages (no dialog); cart problem state (inactive product) disables the checkout; no-address state with `?next=` returns to the checkout after adding; simulated 502, 409 and a non-Stripe `checkout_url`; 375px and 360px wide pages without horizontal scroll; seller sees no Cart, My Orders or Addresses links. The dev database was restored to the seeded state afterwards.
 
 ## Key design decisions (M6)
 

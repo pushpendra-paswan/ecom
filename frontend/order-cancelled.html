@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order not paid</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-requires-login="true">
+  <header id="site-header"></header>
+
+  <main class="container">
+    <h1>Order not paid</h1>
+
+    <div id="cancelled-area">
+      <p>Your order was not paid. The items stay reserved for up to 30 minutes and are then released automatically.</p>
+      <p id="cancelled-links" class="order-links"></p>
+    </div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/order-cancelled.js"></script>
+</body>
+</html>

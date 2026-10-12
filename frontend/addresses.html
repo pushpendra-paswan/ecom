@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your addresses</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-requires-login="true">
+  <header id="site-header"></header>
+
+  <main class="container">
+    <h1>Your addresses</h1>
+
+    <!-- Errors from changes (filled by addresses.js) -->
+    <p id="address-message" class="error-message" hidden></p>
+
+    <div class="addresses-layout">
+      <!-- The saved addresses (filled by addresses.js) -->
+      <div id="address-list-area"><p class="state-loading">Loading...</p></div>
+
+      <!-- The form is used for adding and for editing -->
+      <div class="address-form-card">
+        <h2 id="address-form-heading">Add an address</h2>
+        <form id="address-form">
+          <label for="address-full-name">Full name</label>
+          <input type="text" id="address-full-name" maxlength="255" required>
+
+          <label for="address-phone">Phone</label>
+          <input type="text" id="address-phone" maxlength="30" required>
+
+          <label for="address-line1">Address line 1</label>
+          <input type="text" id="address-line1" maxlength="255" required>
+
+          <label for="address-line2">Address line 2 (optional)</label>
+          <input type="text" id="address-line2" maxlength="255">
+
+          <label for="address-city">City</label>
+          <input type="text" id="address-city" maxlength="100" required>
+
+          <label for="address-state">State</label>
+          <input type="text" id="address-state" maxlength="100" required>
+
+          <label for="address-postal-code">Postal code</label>
+          <input type="text" id="address-postal-code" maxlength="20" required>
+
+          <label for="address-country">Country</label>
+          <input type="text" id="address-country" maxlength="100" value="India" required>
+
+          <label class="checkbox-label">
+            <input type="checkbox" id="address-is-default">
+            <span>Make this my default address</span>
+          </label>
+
+          <div class="form-buttons">
+            <button type="submit" id="address-submit-button">Add address</button>
+            <button type="button" id="address-cancel-button" class="button-secondary" hidden>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/addresses.js"></script>
+</body>
+</html>

@@ -113,6 +113,15 @@ async function showLayout() {
     cartBadge.hidden = true;
     cartLink.append(cartBadge);
     userArea.append(cartLink);
+
+    // Customers also get links to their orders and their addresses
+    const ordersLink = document.createElement("a");
+    ordersLink.href = "/orders.html";
+    ordersLink.textContent = "My Orders";
+    const addressesLink = document.createElement("a");
+    addressesLink.href = "/addresses.html";
+    addressesLink.textContent = "Addresses";
+    userArea.append(ordersLink, addressesLink);
   }
 
   userArea.append(greeting, logoutButton);

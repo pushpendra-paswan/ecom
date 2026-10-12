@@ -84,3 +84,18 @@ def create_product(db: Session, values: dict):
     db.add(product)
     db.flush()
     return product
+
+
+def lock_products(db: Session, product_ids: list[int]):
+    # Lock many product rows with ONE query (SELECT ... WHERE id IN (...) ORDER BY id FOR UPDATE).
+    # Always ascending id order, so two transactions with overlapping products can never deadlock.
+    # No joins, because Postgres refuses FOR UPDATE on the outer side of a join.
+    # populate_existing makes sure the locked (newest) values replace anything already loaded in the session.
+    query = (
+        select(Product)
+        .where(Product.id.in_(product_ids))
+        .order_by(Product.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return list(db.execute(query).scalars().all())

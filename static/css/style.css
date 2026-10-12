@@ -654,6 +654,303 @@ button:disabled {
   margin-top: var(--space-small);
 }
 
+/* ===== Checkout ===== */
+.checkout-link,
+.checkout-link-disabled {
+  display: block;
+  width: 100%;
+  margin: var(--space-small) 0;
+  text-align: center;
+}
+
+.checkout-link-disabled {
+  padding: 0.5rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-muted);
+}
+
+.checkout-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--space-large);
+  align-items: start;
+}
+
+.checkout-summary,
+.checkout-addresses {
+  padding: var(--space-medium);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.checkout-summary h2,
+.checkout-addresses h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.checkout-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkout-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-medium);
+  padding: 0.25rem 0;
+}
+
+.checkout-line-name {
+  overflow-wrap: anywhere;
+}
+
+.checkout-subtotal {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-small);
+  padding-top: var(--space-small);
+  border-top: 1px solid var(--color-border);
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.address-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-small);
+  margin-bottom: var(--space-small);
+  padding: var(--space-small);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.address-choice input {
+  margin-top: 0.3rem;
+}
+
+.checkout-message {
+  margin-top: var(--space-medium);
+  overflow-wrap: anywhere;
+}
+
+.checkout-button {
+  width: 100%;
+  margin-top: var(--space-medium);
+}
+
+.success-message {
+  font-size: 1.3rem;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.order-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-medium);
+}
+
+/* ===== Addresses page ===== */
+.addresses-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--space-large);
+  align-items: start;
+}
+
+.address-card {
+  margin-bottom: var(--space-small);
+  padding: var(--space-medium);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.address-card-name {
+  font-weight: bold;
+}
+
+.address-card-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-small);
+  margin-top: var(--space-small);
+}
+
+.address-form-card {
+  padding: var(--space-medium);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.address-form-card h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.address-form-card label {
+  display: block;
+  margin-top: var(--space-small);
+  margin-bottom: 0.25rem;
+  font-weight: bold;
+}
+
+.address-form-card input[type="text"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.address-form-card .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+  font-weight: normal;
+}
+
+.form-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-small);
+  margin-top: var(--space-medium);
+}
+
+/* ===== Orders ===== */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.badge-default {
+  margin-bottom: var(--space-small);
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #0d47a1;
+}
+
+.badge-pending-payment {
+  background: #fff4e5;
+  border-color: #f5c27a;
+  color: var(--color-stock-low);
+}
+
+.badge-paid,
+.badge-delivered {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: var(--color-stock-in);
+}
+
+.badge-shipped {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #0d47a1;
+}
+
+.badge-cancelled {
+  background: var(--color-error-background);
+  border-color: #f1a9a0;
+  color: var(--color-stock-out);
+}
+
+.order-card {
+  margin-bottom: var(--space-medium);
+  padding: var(--space-medium);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.order-card-header,
+.order-card-footer,
+.order-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-small) var(--space-medium);
+}
+
+.order-card-title {
+  font-weight: bold;
+}
+
+.order-card-date {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.order-card-items {
+  margin: var(--space-small) 0;
+  padding-left: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.order-card-more {
+  color: var(--color-muted);
+  list-style: none;
+  margin-left: -1.2rem;
+}
+
+.order-card-total {
+  font-weight: bold;
+}
+
+.order-detail-section {
+  margin-top: var(--space-medium);
+  overflow-wrap: anywhere;
+}
+
+.order-detail-section h2 {
+  font-size: 1.2rem;
+  margin-bottom: var(--space-small);
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.order-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.order-table th,
+.order-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.order-table th:not(:first-child),
+.order-table td:not(:first-child) {
+  text-align: right;
+}
+
+.order-detail-total {
+  margin-top: var(--space-medium);
+  font-size: 1.4rem;
+  font-weight: bold;
+}
+
+.order-detail-payment {
+  margin-bottom: var(--space-medium);
+  color: var(--color-muted);
+}
+
 /* ===== States (loading, error, empty) ===== */
 .state-loading,
 .state-empty,
@@ -718,5 +1015,17 @@ button:disabled {
   .cart-line-controls {
     grid-column: 1 / -1;
     justify-content: space-between;
+  }
+
+  .checkout-layout,
+  .addresses-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-medium);
+  }
+
+  .order-table th,
+  .order-table td {
+    padding: 0.4rem 0.25rem;
+    font-size: 0.9rem;
   }
 }

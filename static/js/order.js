@@ -1,0 +1,151 @@
+// The order detail page, from ?id=
+async function loadOrderPage() {
+  const orderArea = document.getElementById("order-area");
+
+  // The labels for the order and payment statuses
+  const statusLabels = {
+    pending_payment: "Awaiting payment",
+    paid: "Paid",
+    shipped: "Shipped",
+    delivered: "Delivered",
+    cancelled: "Cancelled",
+  };
+  const paymentLabels = {
+    pending: "Pending",
+    succeeded: "Paid",
+    failed: "Failed",
+  };
+
+  // The id must be a positive whole number that fits the database integer column.
+  // Anything else shows "Order not found" without calling the API.
+  const idText = new URLSearchParams(window.location.search).get("id");
+  let order = null;
+  if (idText !== null && /^[1-9][0-9]*$/.test(idText) && Number(idText) <= 2147483647) {
+    try {
+      order = await apiRequest("/orders/" + idText, "GET");
+    } catch (error) {
+      if (error.status !== 404) {
+        // Some other problem: show it and a button that reloads the page
+        orderArea.textContent = "";
+        const errorBox = document.createElement("div");
+        errorBox.className = "state-error";
+        const errorText = document.createElement("p");
+        errorText.textContent = "Could not load the order: " + error.message;
+        const retryButton = document.createElement("button");
+        retryButton.type = "button";
+        retryButton.textContent = "Try again";
+        retryButton.addEventListener("click", function () {
+          window.location.reload();
+        });
+        errorBox.append(errorText, retryButton);
+        orderArea.append(errorBox);
+        return;
+      }
+    }
+  }
+
+  // A bad id, or an order that is missing or belongs to someone else
+  orderArea.textContent = "";
+  if (order === null) {
+    document.title = "Order not found";
+    const notFoundBox = document.createElement("div");
+    notFoundBox.className = "state-empty";
+    const notFoundText = document.createElement("p");
+    notFoundText.textContent = "Order not found";
+    const ordersLink = document.createElement("a");
+    ordersLink.href = "/orders.html";
+    ordersLink.textContent = "My Orders";
+    notFoundBox.append(notFoundText, ordersLink);
+    orderArea.append(notFoundBox);
+    return;
+  }
+  document.title = "Order #" + order.id;
+
+  // Heading: the order number, the date and the status label
+  const heading = document.createElement("h1");
+  heading.textContent = "Order #" + order.id;
+  const headerRow = document.createElement("div");
+  headerRow.className = "order-detail-header";
+  const date = document.createElement("span");
+  date.className = "order-card-date";
+  date.textContent = "Placed on " + new Date(order.created_at).toLocaleString("en-IN");
+  const statusBadge = document.createElement("span");
+  statusBadge.className = "badge badge-" + order.status.replace("_", "-");
+  statusBadge.textContent = statusLabels[order.status] || order.status;
+  headerRow.append(date, statusBadge);
+
+  // The shipping address (textContent only, because the customer typed these values)
+  const address = order.shipping_address;
+  const addressSection = document.createElement("section");
+  addressSection.className = "order-detail-section";
+  const addressHeading = document.createElement("h2");
+  addressHeading.textContent = "Shipping address";
+  addressSection.append(addressHeading);
+  const addressLines = [address.full_name, address.line1];
+  if (address.line2) {
+    addressLines.push(address.line2);
+  }
+  addressLines.push(address.city + ", " + address.state + " " + address.postal_code);
+  addressLines.push(address.country);
+  addressLines.push("Phone: " + address.phone);
+  for (const lineText of addressLines) {
+    const addressLine = document.createElement("div");
+    addressLine.textContent = lineText;
+    addressSection.append(addressLine);
+  }
+
+  // The items table: name, unit price, quantity and line total
+  const itemsSection = document.createElement("section");
+  itemsSection.className = "order-detail-section";
+  const itemsHeading = document.createElement("h2");
+  itemsHeading.textContent = "Items";
+  const tableWrapper = document.createElement("div");
+  tableWrapper.className = "table-wrapper";
+  const table = document.createElement("table");
+  table.className = "order-table";
+  const tableHead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const columnName of ["Product", "Price", "Quantity", "Total"]) {
+    const headCell = document.createElement("th");
+    headCell.textContent = columnName;
+    headRow.append(headCell);
+  }
+  tableHead.append(headRow);
+  const tableBody = document.createElement("tbody");
+  for (const item of order.items) {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.textContent = item.product_name;
+    const priceCell = document.createElement("td");
+    priceCell.textContent = "₹" + (item.unit_price / 100).toLocaleString("en-IN", { minimumFractionDigits: item.unit_price % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+    const quantityCell = document.createElement("td");
+    quantityCell.textContent = String(item.quantity);
+    const lineTotalCell = document.createElement("td");
+    lineTotalCell.textContent = "₹" + (item.line_total / 100).toLocaleString("en-IN", { minimumFractionDigits: item.line_total % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+    row.append(nameCell, priceCell, quantityCell, lineTotalCell);
+    tableBody.append(row);
+  }
+  table.append(tableHead, tableBody);
+  tableWrapper.append(table);
+  itemsSection.append(itemsHeading, tableWrapper);
+
+  // The total and the payment status
+  const totalLine = document.createElement("div");
+  totalLine.className = "order-detail-total";
+  totalLine.textContent = "Total: ₹" + (order.total_amount / 100).toLocaleString("en-IN", { minimumFractionDigits: order.total_amount % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+  const paymentLine = document.createElement("div");
+  paymentLine.className = "order-detail-payment";
+  if (order.payment !== null) {
+    paymentLine.textContent = "Payment: " + (paymentLabels[order.payment.status] || order.payment.status);
+  } else {
+    paymentLine.textContent = "Payment: not available";
+  }
+
+  const ordersLink = document.createElement("a");
+  ordersLink.href = "/orders.html";
+  ordersLink.textContent = "Back to My Orders";
+
+  orderArea.append(heading, headerRow, addressSection, itemsSection, totalLine, paymentLine, ordersLink);
+}
+
+loadOrderPage();
