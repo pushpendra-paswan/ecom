@@ -8,17 +8,18 @@ class RegisterRequest(BaseModel):
     # Remove spaces around every text value before it is checked
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: EmailStr
+    email: EmailStr = Field(max_length=255)
     # bcrypt only uses the first 72 bytes of a password
     password: str = Field(min_length=8, max_length=72)
-    full_name: str = Field(min_length=1, max_length=255)
+    full_name: str = Field(min_length=1, max_length=200)
     # Only these two roles can be chosen. Admins come from the seed.
     role: Literal["customer", "seller"] = "customer"
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    # Wrong values are a 401 in the service. These limits only stop huge inputs (a password is 72 bytes at most).
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -30,7 +31,7 @@ class UpdateProfileRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     # Only the name can be changed
-    full_name: str = Field(min_length=1, max_length=255)
+    full_name: str = Field(min_length=1, max_length=200)
 
 
 class UserResponse(BaseModel):

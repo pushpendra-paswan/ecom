@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My Products</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-requires-login="true">
@@ -16,10 +17,10 @@
     </div>
 
     <!-- A message after an action fails (filled by seller-products.js) -->
-    <p id="action-message" class="error-message" hidden></p>
+    <p id="action-message" class="error-message" role="alert" hidden></p>
 
     <!-- The products and the page links (filled by seller-products.js) -->
-    <div id="products-area"><p class="state-loading">Loading...</p></div>
+    <div id="products-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
     <div id="pagination-area"></div>
   </main>
 

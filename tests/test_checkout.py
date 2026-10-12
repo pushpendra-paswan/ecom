@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.catalog import Product
 from app.models.order import Order, OrderItem
-from app.models.user import Address
 
 CHECKOUT_URL = "https://checkout.stripe.com/c/pay/cs_test_fake"
 

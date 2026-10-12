@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Order placed</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-requires-login="true">
@@ -13,7 +14,7 @@
     <h1>Order placed</h1>
 
     <!-- Filled by order-success.js, which checks the order status with the API -->
-    <div id="success-area"><p class="state-loading">Loading...</p></div>
+    <div id="success-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
   </main>
 
   <footer id="site-footer"></footer>

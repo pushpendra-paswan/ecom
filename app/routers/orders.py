@@ -29,7 +29,7 @@ def checkout(
 
 @router.get("", response_model=OrderListResponse)
 def list_orders(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     customer: User = Depends(require_customer),
     db: Session = Depends(get_db),

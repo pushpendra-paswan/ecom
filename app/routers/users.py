@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Path, Response
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
@@ -43,8 +43,8 @@ def create_my_address(
 
 @router.put("/me/addresses/{address_id}", response_model=AddressResponse)
 def update_my_address(
-    address_id: int,
     request: AddressRequest,
+    address_id: int = Path(ge=1, le=2147483647),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -53,7 +53,7 @@ def update_my_address(
 
 @router.delete("/me/addresses/{address_id}", status_code=204)
 def delete_my_address(
-    address_id: int,
+    address_id: int = Path(ge=1, le=2147483647),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Register</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -14,10 +15,10 @@
       <h1>Create an account</h1>
       <form id="register-form">
         <label for="full-name">Full name</label>
-        <input type="text" id="full-name" required maxlength="255">
+        <input type="text" id="full-name" required maxlength="200">
 
         <label for="email">Email</label>
-        <input type="email" id="email" required>
+        <input type="email" id="email" required maxlength="255">
 
         <label for="password">Password (8 to 72 characters)</label>
         <input type="password" id="password" required minlength="8" maxlength="72">
@@ -28,7 +29,7 @@
           <option value="seller">Sell things (Seller)</option>
         </select>
 
-        <p id="error-message" class="error-message" hidden></p>
+        <p id="error-message" class="error-message" role="alert" hidden></p>
         <button type="submit" id="submit-button">Register</button>
       </form>
       <p>Already have an account? <a href="/login.html">Log in</a></p>

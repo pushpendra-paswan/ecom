@@ -1,5 +1,9 @@
 # PROJECT_CONTEXT.md
 
+**Project status: complete (M0 to M10).**
+
+Where things are: how to run and test (below), the database schema, the endpoint table, one section per milestone, then **Security model (M10)**, **Performance review (M10)**, **Hardening and audit decisions (M10)**, **Docker (M10)** and **Future work**. The root `README.md` is the guide for a newcomer.
+
 ## Project summary
 
 An Amazon-style e-commerce web app, built for learning the full web flow from browser to database. Customers browse, search, add to cart, pay with Stripe (test mode only) and track orders. Sellers and admins manage products, inventory and orders. It is a well-built monolith; shipping is mocked. See `CLAUDE.md` for all rules (coding style, architecture, checkout and webhook rules, scope list).
@@ -10,7 +14,7 @@ An Amazon-style e-commerce web app, built for learning the full web flow from br
 - ORM and migrations: SQLAlchemy 2.1 (synchronous), Alembic
 - Database: PostgreSQL 16 (driver: psycopg 3)
 - Frontend: plain HTML, CSS, JavaScript (served by FastAPI)
-- Testing: pytest and httpx (via FastAPI `TestClient`) against a real Postgres test database
+- Testing: pytest, pytest-cov and httpx (via FastAPI `TestClient`) against a real Postgres test database
 - Dev environment: Docker Compose (`app` and `db`)
 - Password hashing: `bcrypt` (used directly, no wrapper)
 - Tokens: `PyJWT` (HS256). Email validation: `email-validator` (used by Pydantic `EmailStr`)
@@ -21,10 +25,10 @@ Pinned versions are in `requirements.txt`.
 ## Folder structure
 
 ```
-ecom/                      # project root (CLAUDE.md calls it ecommerce/)
+ecom/                      # project root
 ├── app/
-│   ├── main.py            # FastAPI app, /health, static and frontend mounts
-│   ├── db.py              # engine, SessionLocal, Base, get_db
+│   ├── main.py            # FastAPI app: size limit, security headers and CSP middleware, error handlers, /health, static and frontend mounts
+│   ├── db.py              # engine (15 s statement timeout), SessionLocal, Base, get_db
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
 │   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py, order.py
@@ -32,18 +36,20 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py, order_lifecycle_service.py, webhook_service.py
 │   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py, order_repository.py
 │   └── core/
-│       ├── config.py      # Settings class (reads env variables)
+│       ├── config.py      # Settings class (reads env variables; JWT_SECRET needs 32 or more characters)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
-├── alembic/               # env.py, script.py.mako, versions/ (three migrations: initial schema, M5 search, M9 refunded status)
+├── alembic/               # env.py, script.py.mako, versions/ (four migrations: initial schema, M5 search, M9 refunded status, M10 order indexes)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
-├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html, seller-products.html, seller-product-form.html, seller-orders.html, seller-order.html, admin-orders.html, admin-order.html, admin-users.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_webhooks.py, test_webhooks_concurrency.py, test_order_cancel.py, test_order_status.py, test_order_lifecycle_concurrency.py, test_frontend_files.py
+├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html, seller-products.html, seller-product-form.html, seller-orders.html, seller-order.html, admin-orders.html, admin-order.html, admin-users.html, 404.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_webhooks.py, test_webhooks_concurrency.py, test_order_cancel.py, test_order_status.py, test_order_lifecycle_concurrency.py, test_frontend_files.py, and (M10) test_endpoint_security.py, test_idor.py, test_no_leaks.py, test_hardening.py, test_query_counts.py, test_full_flow.py, test_coverage_gaps.py
 ├── docker-compose.yml
 ├── Dockerfile
+├── .dockerignore
 ├── pytest.ini
 ├── requirements.txt
 ├── .env.example / .env    # .env is git-ignored
+├── README.md
 ├── CLAUDE.md
 └── PROJECT_CONTEXT.md
 ```
@@ -60,15 +66,16 @@ docker compose up --build
 - CSS: http://localhost:8000/static/css/style.css
 - Alembic: `docker compose exec app alembic current`
 
-`.env` is a copy of `.env.example`. Postgres is not published on the host; use `docker compose exec db psql -U postgres ecommerce`.
+`.env` is a copy of `.env.example` with a real `JWT_SECRET` (`openssl rand -hex 32`; the app refuses to start with a missing or short one). Postgres is not published on the host (no `ports:` on the `db` service); use `docker compose exec db psql -U postgres ecommerce`. The app container runs as user id 1000, has a healthcheck on `/health` (`docker compose ps` shows `healthy`) and starts uvicorn with `--reload`; see "Docker (M10)". Full steps for a newcomer (Stripe CLI included) are in `README.md`.
 
 ## How to test
 
 ```bash
 docker compose exec app pytest
+docker compose exec app pytest --cov=app --cov-report=term-missing     # with the coverage report (pytest-cov, M10)
 ```
 
-Tests use `TEST_DATABASE_URL` (database `ecommerce_test`). `tests/conftest.py` creates that database if missing, then runs `alembic downgrade base` and `alembic upgrade head` on it once per test session (so the migration itself is tested). It refuses to run if the test and dev database names are the same.
+Tests use `TEST_DATABASE_URL` (database `ecommerce_test`). `tests/conftest.py` creates that database if missing, then runs `alembic downgrade base` and `alembic upgrade head` on it once per test session (so the migration itself is tested). It refuses to run if the test and dev database names are the same. The test engine uses the same 15 second `statement_timeout` as the real engine (`STATEMENT_TIMEOUT_MS` from `app/db.py`).
 
 Fixtures:
 - `db_session`: a session inside an outer transaction that is rolled back after every test (savepoint mode, so a failed statement inside `pytest.raises(IntegrityError)` does not break the test). Use this for model and repository/service tests.
@@ -83,6 +90,11 @@ Helper fixtures in `conftest.py` (M2, M3):
 - Shared by the order, webhook and cancel tests (moved into `conftest.py` in M9; they used to live in `test_webhooks.py`): `stripe_create` (patches `stripe.checkout.Session.create`, sets a dummy `sk_test_` key), the autouse `session_expire` and `refund_create` (patch `stripe.checkout.Session.expire` and `stripe.Refund.create`, so the real Stripe API can never be reached by any test), `query_database`, `change_database`, `store` (a seller `store.first_seller`, a category, a logged-in customer `store.customer`; `store.product(stock, price, seller=None)` and `store.place_order(items, customer=None)` go through the real checkout API), `read_order` (order status, payment status, payment intent, session id, refund id), `read_stock`, `pay` (pays an order with a signed `checkout.session.completed` webhook) and the function `make_event(...)` (import it with `from tests.conftest import make_event`).
 - `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None, description="A test product")` (M3, `description` added in M5): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
+M10 test files (each test builds its own data, nothing uses the seed; they reuse the fixtures above and add no new fixture to `conftest.py` except that the test engine now uses the real statement timeout):
+- `test_endpoint_security.py`: `ENDPOINTS` (method, path, access) for all 38 endpoints and the five checks described in "Security model (M10)". Reads the real routes from `app.openapi()` plus `app.routes` because FastAPI 0.143 wraps included routers in a private object.
+- `test_idor.py` (customer B against customer A, seller B against seller A, inactive products), `test_no_leaks.py` (one full scenario with real-looking Stripe ids; every GET endpoint for every allowed role), `test_hardening.py` (headers and CSP, 413, a route that raises, NUL / huge / long / wrong-type input, emoji and right-to-left text, login timing, weak secret, no CORS, the order total cap, the webhook order id), `test_query_counts.py` (a `before_cursor_execute` listener: the same number of SQL statements for 2 rows and for 12 rows on `GET /products`, `/cart`, `/orders`, `/seller/orders`, `/admin/orders`), `test_full_flow.py` (seller, customer, checkout, webhook, shipped, delivered, a second order paid and cancelled with the refund call checked), `test_coverage_gaps.py` (error and permission branches the other files did not reach).
+- Tests that expect a 500 use `TestClient(app, raise_server_exceptions=False)`. The one test that adds a route to the app removes it again in a `finally` (the route is moved to the front because the `/` frontend mount would otherwise answer 404).
+
 ## Completed milestones
 
 - **M0: Project setup.** Docker Compose (app + Postgres 16 with healthcheck and named volume), FastAPI skeleton with `/health`, static and frontend mounts, Alembic configured (no migrations), pytest against a separate test database.
@@ -96,13 +108,15 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M8: Stripe webhooks.** `POST /webhooks/stripe` (public, secured by the Stripe signature): `checkout.session.completed` marks the order paid, `checkout.session.expired` cancels it and gives the stock back, duplicates and retries are harmless, a late payment for a cancelled order is refunded. One service function, three repository functions for orders and one for products. No schema change (no new migration). 155 tests passing (31 new: 29 in `tests/test_webhooks.py`, 2 in `tests/test_webhooks_concurrency.py`; see "Webhooks (M8)").
 - **M9: Order lifecycle, cancellations and dashboards.** `POST /orders/{id}/cancel` (customer own order, or admin; stock restored; Stripe session expired for an unpaid order, full Stripe refund for a paid one; "retry refund" path), `PATCH /seller/orders/{id}/status` and `PATCH /admin/orders/{id}/status` (paid to shipped to delivered), seller and admin order read endpoints, `GET /seller/products/{id}`, a row lock on product edits, a late-payment refund that now marks the payment `refunded`. One small migration (`408881ba845e`: `refunded` payment status and `payments.stripe_refund_id`). Seller pages (products, product form, orders, order detail), admin pages (orders, order detail, users), cancel and retry-refund buttons on the customer order page. 213 tests passing (58 new; see "Order lifecycle (M9)").
 
+- **M10: Hardening and finish.** Size limit, security headers and CSP, safe error handling (`500` and `DataError` handlers), required 32 character `JWT_SECRET`, statement timeout, login timing protection, bounds on every input, order total cap, webhook order id rule, measured indexes (migration `e918e5dbff2d`), a frontend security and accessibility pass and `404.html`, the endpoint inventory test and six more test files (see "Test results (M10)"), a code and style audit, `pip-audit`, Docker polish (non-root user, healthcheck, `.dockerignore`) and the `README.md`. No new endpoints and no new tables. See "Security model (M10)", "Performance review (M10)" and "Hardening and audit decisions (M10)".
+
 ## Pending milestones
 
-M10 Hardening and finish
+None. The project is complete (M0 to M10). Possible next steps are in "Future work".
 
 ## Database schema
 
-Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M9 changed the payments status CHECK and added `payments.stripe_refund_id` in `alembic/versions/408881ba845e_payments_refunded_status_and_refund_id.py` (written by hand, because autogenerate does not see CHECK changes; the downgrade turns `refunded` rows into `succeeded` first). M5 added the `products.search_vector` column and two indexes in `alembic/versions/099593dc45a9_add_product_search_vector.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
+Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M10 added the three order indexes (and dropped `ix_orders_user_id`) in `alembic/versions/e918e5dbff2d_add_order_list_indexes.py`; all money columns are `INTEGER` and cannot overflow, see "Input bounds" in the security model. The complete list of indexes with the reason for each is in "Performance review (M10)". M9 changed the payments status CHECK and added `payments.stripe_refund_id` in `alembic/versions/408881ba845e_payments_refunded_status_and_refund_id.py` (written by hand, because autogenerate does not see CHECK changes; the downgrade turns `refunded` rows into `succeeded` first). M5 added the `products.search_vector` column and two indexes in `alembic/versions/099593dc45a9_add_product_search_vector.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
 
 **users**: `email` varchar(255) unique not null; `password_hash` not null; `full_name` not null; `role` varchar(20) default `customer`, CHECK in (`customer`, `seller`, `admin`); `is_active` bool default true; `created_at`.
 
@@ -116,9 +130,9 @@ Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M9 cha
 
 **cart_items**: `cart_id` FK carts **ON DELETE CASCADE**; `product_id` FK products (no action); `quantity` CHECK `> 0`; UNIQUE (`cart_id`, `product_id`).
 
-**orders**: `user_id` FK users **ON DELETE RESTRICT**; `status` varchar(20) default `pending_payment`, CHECK in (`pending_payment`, `paid`, `shipped`, `delivered`, `cancelled`); `total_amount` CHECK `>= 0`; shipping address copy: `shipping_full_name`, `shipping_phone`, `shipping_line1`, `shipping_line2` (nullable), `shipping_city`, `shipping_state`, `shipping_postal_code`, `shipping_country` (no FK to addresses); `created_at`; `updated_at`. Indexes: `ix_orders_user_id`, `ix_orders_status`.
+**orders**: `user_id` FK users **ON DELETE RESTRICT**; `status` varchar(20) default `pending_payment`, CHECK in (`pending_payment`, `paid`, `shipped`, `delivered`, `cancelled`); `total_amount` CHECK `>= 0`; shipping address copy: `shipping_full_name`, `shipping_phone`, `shipping_line1`, `shipping_line2` (nullable), `shipping_city`, `shipping_state`, `shipping_postal_code`, `shipping_country` (no FK to addresses); `created_at`; `updated_at`. Indexes: `ix_orders_status`, `ix_orders_created_at_id` (`created_at DESC, id DESC`) and `ix_orders_user_id_created_at_id` (`user_id, created_at DESC, id DESC`; M10, replaced the old `ix_orders_user_id`). `Order.items` is ordered by `OrderItem.id` in the relationship.
 
-**order_items**: `order_id` FK orders **ON DELETE CASCADE**; `product_id` FK products **ON DELETE RESTRICT**; `product_name` (snapshot); `unit_price` (snapshot) CHECK `> 0`; `quantity` CHECK `> 0`.
+**order_items**: `order_id` FK orders **ON DELETE CASCADE** (index `ix_order_items_order_id`, M10); `product_id` FK products **ON DELETE RESTRICT**; `product_name` (snapshot); `unit_price` (snapshot) CHECK `> 0`; `quantity` CHECK `> 0`.
 
 **payments**: `order_id` FK orders (no action), UNIQUE (one payment per order); `stripe_checkout_session_id` varchar(255) nullable, UNIQUE; `stripe_payment_intent_id` nullable; `stripe_refund_id` varchar(255) nullable (M9: set when a refund was made; empty when Stripe said the charge was already refunded); `amount` CHECK `>= 0`; `currency` default `inr`; `status` default `pending`, CHECK in (`pending`, `succeeded`, `failed`, `refunded`) (M9 added `refunded`); `created_at`; `updated_at`.
 
@@ -183,7 +197,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M9)
+## API endpoints (as of M10, 38 operations; the access rules and the ownership rules are also in "Security model (M10)")
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -201,9 +215,9 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | POST `/categories` | admin only | Returns 201. Duplicate name or slug: 409. Name with no letters or digits: 422 |
 | PUT `/categories/{category_id}` | admin only | Same body and rules as create. Missing: 404 |
 | DELETE `/categories/{category_id}` | admin only | Returns 204. Any product (active or not) uses it: 409 `"Category has products"`. Missing: 404 |
-| GET `/products` | public | Paginated, active products only. Search, filters and sort: see "Search (M5)" |
+| GET `/products` | public | Paginated (`page` up to 100,000), active products only. Search, filters and sort: see "Search (M5)" |
 | GET `/products/{product_id}` | public | Missing or inactive: 404 |
-| POST `/products` | seller only | Returns 201. Admin and customer get 403. Unknown `category_id`: 400 |
+| POST `/products` | seller only | Returns 201. Admin and customer get 403. Unknown `category_id`: 400. `price` 1 to 10,000,000 paise, `stock` 0 to 1,000,000 (above: 422) |
 | PATCH `/products/{product_id}` | seller (own products) or admin (any) | Partial update. Customer: 403. Other seller's product or missing: 404 |
 | DELETE `/products/{product_id}` | seller (own products) or admin (any) | Soft delete, returns 204 (also when already inactive). Same rules as PATCH |
 | GET `/seller/products` | seller only | Paginated, the caller's own products, active or not, newest first |
@@ -214,7 +228,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | PATCH `/cart/items/{product_id}` | customer only | Body `{quantity (1 to 10)}`. Sets the exact quantity. Not in the cart: 404. Inactive product or over the limit: 409 |
 | DELETE `/cart/items/{product_id}` | customer only | Always 204, even if the line was not there |
 | DELETE `/cart` | customer only | Removes all lines, always 204. The cart row stays |
-| POST `/orders/checkout` | customer only | Returns 201 `{order_id, checkout_url, total_amount}`. Body `{address_id}` only. See "Checkout and orders (M7)" |
+| POST `/orders/checkout` | customer only | Returns 201 `{order_id, checkout_url, total_amount}`. Body `{address_id}` only. A total above 99,999,999 paise: 409, nothing changes. See "Checkout and orders (M7)" |
 | GET `/orders` | customer only | Paginated, the caller's orders, newest first (`created_at DESC, id DESC`). Each item: `id, status, total_amount, created_at, item_count, items[{product_id, product_name, unit_price, quantity}]` |
 | GET `/orders/{order_id}` | customer only | `id, status, total_amount, created_at, shipping_address{...}, items[{..., line_total}], payment{status, amount, currency}`. Someone else's or a missing order: 404 `"Order not found"`. A non-numeric id: 422 |
 | POST `/orders/{order_id}/cancel` | customer (own order) or admin (any order) | M9. Returns 200 `{order_id, status, payment_status}`. Seller 403, no token 401, missing or someone else's order 404 `"Order not found"`, shipped or delivered 409, refund not possible 503 or 409, refund failed 502. See "Order lifecycle (M9)" |
@@ -232,9 +246,9 @@ The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html`, `
 
 ## Auth flow (M2)
 
-- **Register** creates a `customer` or `seller` (never `admin`; the seed creates admins). Email is trimmed and lowercased, password is 8 to 72 characters (also max 72 bytes), stored only as a bcrypt hash. Duplicate email: 409.
-- **Login** looks up the lowercased email, checks the bcrypt password first, then `is_active`. Unknown email and wrong password give the same 401 `"Incorrect email or password"` (an unknown email still runs one bcrypt hash so timing is similar). A correct password on a disabled account gives 403 `"Account is disabled"`.
-- **Token:** PyJWT, HS256, signed with `JWT_SECRET`. Payload is only `sub` (user id as a string) and `exp` (`JWT_EXPIRE_MINUTES`, default 60). The role is NOT in the token.
+- **Register** creates a `customer` or `seller` (never `admin`; the seed creates admins). Email is trimmed and lowercased, password is 8 to 72 characters (also max 72 bytes, and no NUL character), stored only as a bcrypt hash. Duplicate email: 409.
+- **Login** looks up the lowercased email, checks the bcrypt password first, then `is_active`. Unknown email and wrong password give the same 401 `"Incorrect email or password"` (an unknown email still runs one `bcrypt.checkpw` against the module constant `DUMMY_PASSWORD_HASH`, same cost factor, so timing is the same; a password over 72 bytes or with a NUL character is also this 401). A correct password on a disabled account gives 403 `"Account is disabled"`.
+- **Token:** PyJWT, HS256 (only HS256 is accepted when decoding, with `exp` and `sub` required), signed with `JWT_SECRET` (32 or more characters). Payload is only `sub` (user id as a string) and `exp` (`JWT_EXPIRE_MINUTES`, default 60). The role is NOT in the token.
 - **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and throws; it goes to `/login.html?next=<encoded path and query of the current page>` only when the page's `<body>` has `data-requires-login="true"` (changed in M4, `next` added in M6).
 - **Every request** to a protected endpoint goes through `get_current_user` (in `app/core/dependencies.py`): it reads the Bearer header (`HTTPBearer(auto_error=False)`), decodes the token, loads the user from the database and returns the user. The role and `is_active` always come from the database.
 - **401** (`"Not authenticated"`, with `WWW-Authenticate: Bearer`): missing header, bad signature, expired token, no `sub`/`exp`, user not found, or user disabled.
@@ -244,7 +258,7 @@ The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html`, `
 
 ## Pagination format (M2)
 
-List endpoints take `page` (default 1, minimum 1) and `page_size` (default 20, between 1 and 100); values outside the range give 422. The response is:
+List endpoints take `page` (default 1, between 1 and 100,000) and `page_size` (default 20, between 1 and 100); values outside the range give 422. The response is:
 
 ```json
 {"items": [...], "total": 42, "page": 1, "page_size": 20}
@@ -254,12 +268,12 @@ List endpoints take `page` (default 1, minimum 1) and `page_size` (default 20, b
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `JWT_SECRET` | none, **required** | Signing key. Generate with `openssl rand -hex 32`. The app refuses to start if it is empty |
+| `JWT_SECRET` | none, **required**, at least 32 characters | Signing key. Generate with `openssl rand -hex 32`. The app and Alembic refuse to start (pydantic validation error) if it is missing or shorter (M10; before, only an empty value was refused) |
 | `JWT_EXPIRE_MINUTES` | 60 | Token lifetime |
 
 Stripe settings (read in `app/core/config.py`, used since M7): `STRIPE_SECRET_KEY` (must start with `sk_test_`; empty gives 503 "Payments are not configured" and any other prefix gives 503 "Only Stripe test keys are allowed", both before any database work), `STRIPE_WEBHOOK_SECRET` (used since M8; empty makes the webhook answer 503 "Webhooks are not configured"), `STRIPE_CURRENCY` (default `inr`), `FRONTEND_BASE_URL` (default `http://localhost:8000`, used for the Stripe success and cancel URLs).
 
-The algorithm (HS256) is written inline where the token is created and decoded. The local `.env` has a generated dev secret; `.env.example` has it empty with a note.
+The algorithm (HS256) is written inline where the token is created and decoded. The local `.env` has a generated dev secret; `.env.example` has the placeholder `REPLACE_ME` (too short on purpose, so a copied example cannot start) with a note.
 
 ## Key design decisions (M2)
 
@@ -270,7 +284,7 @@ The algorithm (HS256) is written inline where the token is created and decoded. 
 - **Passwords:** the 72-byte limit is checked in bytes in the service (a 72-character password with multi-byte characters is rejected with 422 on register, and with 401 on login), because bcrypt 5 raises an error above 72 bytes.
 - **Addresses:** one shared `AddressRequest` for POST and PUT (PUT replaces all fields). A user may end up with no default address (deleting the default, or a PUT with `is_default: false` on it); the app never promotes another one. Nothing in the database enforces "one default per user"; the service does it.
 - **Unknown JSON fields are ignored** (for example `role` in a PATCH body), so PATCH `/users/me` can only change `full_name`.
-- **An empty `JWT_SECRET` stops the app at startup** (a check at the bottom of `config.py`), because an empty key would allow forged tokens.
+- **A missing or short `JWT_SECRET` stops the app at startup** (`Field(min_length=32)` in `config.py`; it was a check at the bottom of the file until M10), because a weak key would allow forged tokens.
 - **`apiRequest`:** the method defaults to `GET` if omitted, and a `204` response returns `null`.
 - `static/js/index.js` (temporary user bar) was added in M2 and deleted in M4 when the real navbar arrived.
 - `static/js/.gitkeep` was deleted because the folder now has files.
@@ -296,7 +310,7 @@ The seller's email and every other private field are never returned. Lists are w
 - **Slug rule** (written inline in `category_service.py`, once in create and once in update): lowercase; spaces and underscores become hyphens; every character outside `a-z`, `0-9` and `-` is removed; repeated hyphens collapse into one; hyphens at the start and end are trimmed. "Home & Kitchen" becomes `home-kitchen`. An empty result (for example "!!!") gives 422. Updating a category regenerates the slug.
 - **Duplicates:** the service inserts and catches `IntegrityError` (rollback, then 409), so the unique constraints on `name` and `slug` decide. Names that differ only in punctuation or case (for example "Books" and "books!") share a slug and give 409.
 - **Money** is integer paise everywhere in the API. Nothing is converted.
-- `image_url` must start with `http://`, `https://` or `/static/images/` (checked by a `Field(pattern=...)`) and is at most 500 characters. `null` is allowed and PATCH with `image_url: null` removes the image.
+- `image_url` must start with `http://`, `https://` or `/static/images/` (checked by a `Field(pattern=...)`) and is at most 500 characters. M10 limits: product `name` 1 to 200, `description` 1 to 5000, `price` 1 to 10,000,000 paise, `stock` 0 to 1,000,000, `category_id` 1 to 2,147,483,647; category `name` 1 to 100 and `description` up to 5000. `null` is allowed and PATCH with `image_url: null` removes the image.
 
 ## Frontend (M4)
 
@@ -323,6 +337,7 @@ The seller's email and every other private field are never returned. Lists are w
 | `/admin-users.html` | `page`. Login required, admin | `frontend/admin-users.html`, `admin-users.js` |
 | `/login.html` | `next` (optional, see "Cart (M6)") | `frontend/login.html`, `login.js` |
 | `/register.html` | `next` (optional, same rule) | `frontend/register.html`, `register.js` |
+| any unknown path | none | `frontend/404.html` (M10): the shared header and footer, "Page not found" and a link home; the `StaticFiles(html=True)` mount serves it with status 404 |
 
 | Script (`static/js/`) | What it does |
 |---|---|
@@ -349,7 +364,7 @@ The seller's email and every other private field are never returned. Lists are w
 
 ### How to add a new page
 
-1. Create `frontend/<name>.html` with `<!DOCTYPE html>`, `lang="en"`, charset and viewport meta tags, a meaningful `<title>` and the stylesheet link.
+1. Create `frontend/<name>.html` with `<!DOCTYPE html>`, `lang="en"`, charset and viewport meta tags, a meaningful `<title>`, `<link rel="icon" href="data:,">` (without it the browser asks for `/favicon.ico` and logs a 404 in the console) and the stylesheet link. Exactly one `<h1>`. No inline `<script>`, `<style>`, `style=""` or `on...=` attribute: the Content-Security-Policy blocks them.
 2. Inside `<body>`: an empty `<header id="site-header"></header>`, a `<main class="container">` with the content, and an empty `<footer id="site-footer"></footer>`.
 3. Scripts at the end of the body, in this order: `api.js`, `layout.js`, then the page script (add `product-card.js` before the page script if it shows product cards).
 4. If the page needs a logged-in user (cart, checkout, orders), put `data-requires-login="true"` on `<body>`. Then a 401 sends the user to `/login.html`. Public pages must NOT set it, so a stale token never redirects them.
@@ -362,6 +377,7 @@ The seller's email and every other private field are never returned. Lists are w
 - **Never put API data into the page with `innerHTML` or template strings that become HTML.** Names, descriptions, category names and seller names come from sellers and admins. Build elements with `document.createElement`, set text with `textContent`, set attributes with `setAttribute` or properties, and use `encodeURIComponent` for text values in links. The description uses `textContent` in an element with `white-space: pre-line`.
 - Every data area starts with "Loading..." and shows a message plus a "Try again" button (reloads the page) when a request fails. Empty lists show "No products found." with a link to all products.
 - Stock status: 0 is red "Out of stock", 1 to 5 is orange "Only N left in stock", above 5 is green "In stock".
+- (M10) Accessibility: every control has a `<label>` or `aria-label`; the areas that show "Loading...", an error or an empty state are `aria-live="polite"`; error paragraphs and the action and checkout messages have `role="alert"`. The `next` redirect check is the same condition in `login.js`, `register.js` and `addresses.js`. Form limits match the API limits (see the security model).
 
 ### Key design decisions (M4)
 
@@ -390,17 +406,17 @@ The seller's email and every other private field are never returned. Lists are w
 | Parameter | Type | Limits | Default | Notes |
 |---|---|---|---|---|
 | `q` | string | trimmed; at most 100 characters (101 gives 422); empty or only spaces counts as no search | none | Full-text search on name and description (see below) |
-| `category` | string | a category slug | none | Unknown slug: 404 |
-| `min_price` | integer, paise | 0 to 2147483647, inclusive | none | Greater than `max_price`: 422 |
-| `max_price` | integer, paise | 0 to 2147483647, inclusive | none | |
+| `category` | string | a category slug, up to 100 characters | none | Unknown slug: 404 |
+| `min_price` | integer, paise | 0 to 1,000,000,000, inclusive (M10; was 2147483647) | none | Greater than `max_price`: 422 |
+| `max_price` | integer, paise | 0 to 1,000,000,000, inclusive (M10) | none | |
 | `in_stock` | boolean | `true` / `false` | `false` | `true` shows only products with `stock > 0` |
 | `sort` | one of `relevance`, `newest`, `price_asc`, `price_desc`, `name_asc` | anything else gives 422 | `relevance` when `q` is present, otherwise `newest` | `relevance` without `q` gives 422 |
-| `page` | integer | 1 or more | 1 | |
+| `page` | integer | 1 to 100,000 (M10) | 1 | |
 | `page_size` | integer | 1 to 100 | 20 | |
 
 - Only active products are ever returned, with every combination. Every sort ends with `id DESC`, so pages are stable. The response shape is unchanged (`items`, `total`, `page`, `page_size`); `total` counts the products after all filters.
 - Orders: `newest` = `created_at DESC`; `price_asc` / `price_desc` = `price`; `name_asc` = `name ASC`; `relevance` = `ts_rank(search_vector, query) DESC` (a name match has weight A, a description match weight B, so name matches rank higher).
-- The price upper limit 2147483647 is the database integer limit. Without it a huge value made Postgres fail with a 500.
+- The price upper limit was the database integer limit (2147483647) until M10; it is now 1,000,000,000 paise (a product costs at most 10,000,000). Without any limit a huge value made Postgres fail with a 500.
 
 ### How the search works
 
@@ -583,7 +599,7 @@ Each line: image (linked, one-time placeholder fallback), name (linked), unit pr
 
 ### The checkout flow (`app/services/checkout_service.py`, function `checkout`)
 
-`POST /orders/checkout` takes only `{address_id}` (1 to 2147483647). Items, prices and amounts always come from the server. It is plain sequential code, steps a to n in order. `CHECKOUT_SESSION_MINUTES = 30` is the constant at the top of the file.
+`POST /orders/checkout` takes only `{address_id}` (1 to 2147483647). Items, prices and amounts always come from the server. It is plain sequential code, steps a to n in order. `CHECKOUT_SESSION_MINUTES = 30` and `MAX_ORDER_TOTAL = 99_999_999` are the constants at the top of the file.
 
 Before any database work: `STRIPE_SECRET_KEY` empty gives 503 "Payments are not configured"; a key that does not start with `sk_test_` gives 503 "Only Stripe test keys are allowed".
 
@@ -597,6 +613,7 @@ Before any database work: `STRIPE_SECRET_KEY` empty gives 503 "Payments are not 
 | d | Lock the product rows of those items with ONE query, `WHERE id IN (...) ORDER BY id FOR UPDATE` (`product_repository.lock_products`) | |
 | e | Check every line against the locked rows: active, and stock at least the quantity. Collect ALL problems | 409 with one message such as `"Pen: out of stock; Book: only 3 left"` (`"<name>: no longer available"`, `"<name>: out of stock"`, `"<name>: only N left"`). Rollback, nothing changed |
 | f | Line prices from the locked product rows, `total_amount = sum(unit_price * quantity)` | |
+| f2 | (M10) If `total_amount` is above `MAX_ORDER_TOTAL` (99,999,999 paise, at the top of the file; Stripe accepts at most eight digits) | Rollback, nothing written, 409 "Order total is too large (maximum ₹9,99,999.99 per order). Remove some items and try again." |
 | g | Create the order (`pending_payment`) with the shipping fields copied from the address | |
 | h | Create the order items (snapshot of `product_name` and `unit_price`) | |
 | i | `product.stock = product.stock - quantity` for each line (the CHECK `stock >= 0` is only a backstop) | |
@@ -702,7 +719,7 @@ Lock order: this endpoint locks the order row, then updates products in ascendin
 ### How the payment is found
 
 1. By `stripe_checkout_session_id` = the session id in the event.
-2. Fallback: `metadata.order_id` (it must be a plain whole number of at most 2147483647: ASCII digits only, so `abc`, `1.5`, `-1`, ` 1`, empty and huge numbers give a logged 200). The fallback matters because checkout stage 2 (M7) can fail **after** the Stripe session exists, which leaves the payment without a session id.
+2. Fallback: `metadata.order_id` (it must be 1 to 9 ASCII digits, checked inline with `isdigit()` and `len()` (M10; before: up to 10 digits and at most 2147483647), so `abc`, `1.5`, `-1`, ` 1`, empty and huge numbers like `99999999999999999999` give a logged 200 and change nothing). The fallback matters because checkout stage 2 (M7) can fail **after** the Stripe session exists, which leaves the payment without a session id.
 3. Found by order id and the payment already has a **different** session id: logged, 200, nothing changes. Found by order id and the session id is empty: the event's session id is saved on the payment (together with the change the event causes).
 4. No payment found: warning, 200.
 
@@ -818,38 +835,310 @@ An order row is locked BEFORE its products are changed, and products are changed
 
 **Dev gotcha found during the run:** checkout uses `order-<id>` as the Stripe idempotency key, and Stripe remembers a key for 24 hours. After resetting or restoring the dev database the order id counter starts again, and a new order can reuse a key with different parameters: Stripe answers 400 (idempotency error), checkout returns 502 and the order is cancelled (the failure path worked as designed). Fix for dev: `SELECT setval('orders_id_seq', 6000)` (the dev counter was set to 6000 after the run). Not a problem on a database that is never reset.
 
-### Notes for M10 (security and hardening pass)
+### Notes for M10 (done)
 
-**Every endpoint with its role and ownership rule:**
+The M9 hand-off notes for M10 (the table of endpoints with their rules, the things to check, the indexes the seller queries rely on, and the README requirements) have all been dealt with: the endpoint rules are in "Security model (M10)", the indexes were measured in "Performance review (M10)" (the guess that `order_items.order_id` and the order sort had no index was right, and both were fixed), and the README is `README.md`.
 
-| Endpoint | Role | Ownership / visibility rule |
+## Security model (M10)
+
+### Access rule of every endpoint (the inventory)
+
+This is the same list as `ENDPOINTS` in `tests/test_endpoint_security.py`, which fails when an endpoint is added without a decision (and when this list has an entry that no longer exists). The access words are: `public`, `signature` (the Stripe webhook), `any_user`, `customer`, `seller`, `admin`, `customer_or_admin`, `seller_or_admin`. 38 endpoints.
+
+| Method and path | Access | Ownership / visibility |
 |---|---|---|
-| `GET /health` | public | none |
-| `POST /auth/register`, `POST /auth/login` | public | none |
-| `GET`, `PATCH /users/me` | any logged-in user | own user only |
-| `GET`, `POST /users/me/addresses`, `PUT`, `DELETE /users/me/addresses/{id}` | any logged-in user | own addresses only (404 otherwise) |
-| `GET /admin/users` | admin | none |
-| `GET /categories` | public | none |
-| `POST`, `PUT`, `DELETE /categories...` | admin | none |
-| `GET /products`, `GET /products/{id}` | public | active products only (404 for inactive) |
-| `POST /products` | seller | `seller_id` is the caller |
-| `PATCH`, `DELETE /products/{id}` | seller or admin (role check inline) | a seller only their own (404 otherwise); product row locked |
-| `GET /seller/products` | seller | own products only |
-| `GET /seller/products/{id}` | seller | own product only (404 otherwise) |
-| `/cart...` (5 endpoints) | customer | own cart only |
-| `POST /orders/checkout` | customer | own cart, own address (404) |
-| `GET /orders`, `GET /orders/{id}` | customer | own orders only (404 otherwise) |
-| `POST /orders/{id}/cancel` | customer or admin (inline) | a customer only their own order (404); admin any |
-| `GET /seller/orders`, `GET /seller/orders/{id}` | seller | paid orders (payment `succeeded`/`refunded`) with at least one of the seller's products; only own lines; no customer email |
-| `PATCH /seller/orders/{id}/status` | seller | same visibility (404) and every line must be theirs (403) |
-| `GET /admin/orders`, `GET /admin/orders/{id}`, `PATCH /admin/orders/{id}/status` | admin | any order |
-| `POST /webhooks/stripe` | public | the Stripe signature |
+| GET `/health` | public | none |
+| POST `/auth/register` | public | none (role `customer` or `seller` only) |
+| POST `/auth/login` | public | none |
+| GET `/users/me` | any_user | own user |
+| PATCH `/users/me` | any_user | own user (name only) |
+| GET `/users/me/addresses` | any_user | own addresses |
+| POST `/users/me/addresses` | any_user | own addresses |
+| PUT `/users/me/addresses/{address_id}` | any_user | own address, otherwise 404 |
+| DELETE `/users/me/addresses/{address_id}` | any_user | own address, otherwise 404 |
+| GET `/admin/users` | admin | all users |
+| GET `/admin/orders` | admin | all orders |
+| GET `/admin/orders/{order_id}` | admin | any order |
+| PATCH `/admin/orders/{order_id}/status` | admin | any order |
+| GET `/categories` | public | none |
+| POST `/categories` | admin | none |
+| PUT `/categories/{category_id}` | admin | none |
+| DELETE `/categories/{category_id}` | admin | none |
+| GET `/products` | public | active products only |
+| GET `/products/{product_id}` | public | active products only (inactive: 404) |
+| POST `/products` | seller | `seller_id` is the caller |
+| PATCH `/products/{product_id}` | seller_or_admin | a seller only their own (404 otherwise), admin any |
+| DELETE `/products/{product_id}` | seller_or_admin | same as PATCH |
+| GET `/seller/products` | seller | own products |
+| GET `/seller/products/{product_id}` | seller | own product, otherwise 404 |
+| GET `/seller/orders` | seller | paid orders (payment `succeeded` or `refunded`) with at least one of the seller's products, own lines only |
+| GET `/seller/orders/{order_id}` | seller | same visibility, otherwise 404 |
+| PATCH `/seller/orders/{order_id}/status` | seller | same visibility (404), every line must be theirs (403) |
+| GET `/cart` | customer | own cart |
+| DELETE `/cart` | customer | own cart |
+| GET `/cart/count` | customer | own cart |
+| POST `/cart/items` | customer | own cart |
+| PATCH `/cart/items/{product_id}` | customer | own cart |
+| DELETE `/cart/items/{product_id}` | customer | own cart |
+| POST `/orders/checkout` | customer | own cart and own address (404) |
+| GET `/orders` | customer | own orders |
+| GET `/orders/{order_id}` | customer | own order, otherwise 404 |
+| POST `/orders/{order_id}/cancel` | customer_or_admin | a customer only their own order (404), admin any |
+| POST `/webhooks/stripe` | signature | the Stripe signature, checked on the raw bytes |
 
-**Things to check:** the 403 versus 404 rules above (404 for ownership and visibility, 403 for roles); the places that return 502 and 503 (see above); no Stripe id, password hash or (for sellers) customer email in any response; no secret or Stripe error text in logs.
+Not listed (not API endpoints): `/docs`, `/redoc`, `/openapi.json`, `/docs/oauth2-redirect`, `/static/...` and the HTML pages.
 
-**Indexes the sellers' order queries rely on** (check them with `EXPLAIN ANALYZE` on a big table, like the M5 measurements): `products.seller_id` (`ix_products_seller_id`) for the EXISTS and the lines; `payments.order_id` (the UNIQUE constraint) for the payment join; `orders.created_at, id` ordering has **no index** (only `ix_orders_user_id` and `ix_orders_status` exist); and **`order_items.order_id` has no index** (the foreign key does not create one in Postgres), so the EXISTS subquery and the line loading probably scan `order_items`. The admin list sorts all orders by `created_at DESC, id DESC` (no index) and filters by `status` (`ix_orders_status`). Measure first; likely candidates are `order_items (order_id)` and `orders (created_at DESC, id DESC)`.
+The tests behind this: `test_endpoint_security.py` (inventory equals the real routes; no token and a garbage token give 401 on every protected endpoint; each role gets 403 where it is not allowed and anything but 401 and 403 where it is; a deactivated user's valid token gives 401 everywhere; wrong secret, `alg: none`, missing `exp`, expired, non-numeric `sub`, missing `sub` and a different algorithm all give the same 401), `test_idor.py` (one customer or seller against another's data: 404 and nothing changed), `test_no_leaks.py` (raw text of every GET response).
 
-**README:** it must explain the Stripe CLI setup (see "Local webhook setup" under "Webhooks (M8)" and `CLAUDE.md`), plus the cancel/refund flows and how to try them.
+### Status codes and when each is used
+
+| Code | Used for |
+|---|---|
+| 400 | A bad Stripe webhook (missing or wrong signature, old timestamp, body that is not JSON); an empty cart at checkout; a category id that does not exist when making a product |
+| 401 | No token, a bad, expired or forged token, a user that no longer exists or is disabled: always `{"detail": "Not authenticated"}` with `WWW-Authenticate: Bearer`. Also a wrong email or password at login (`"Incorrect email or password"`, identical for unknown email and wrong password) |
+| 403 | Logged in but the wrong role; a seller changing the status of an order that has other sellers' products; a disabled account that gave the right password at login |
+| 404 | The resource does not exist **or is not yours / not visible to you** (other people's addresses, orders, products, cart lines; orders a seller may not see; inactive products); unknown category slug; unknown HTML page (the friendly `404.html`) |
+| 409 | Conflicts and refused changes: duplicate email or category, a stock or cart limit, an invalid order status change, cancelling a shipped order, an order total above 99,999,999 paise, a paid order without a payment intent to refund |
+| 413 | A request whose `Content-Length` is above 1,000,000 bytes (the body is not read) |
+| 422 | Bad input: failed validation (type, length, number range), a NUL character or a number the database refuses (the `DataError` handler: `{"detail": "Invalid input"}`), password rules, a name without letters or digits |
+| 500 | Only for unexpected errors: `{"detail": "Internal server error"}`. The one deliberate exception is the Stripe webhook, which answers 500 `"Refund failed, please retry"` or a retryable failure so that Stripe delivers the event again |
+| 502 | A Stripe call failed: the Checkout Session at checkout (cart restored), or the refund after a cancel (the order stays cancelled, "Retry refund") |
+| 503 | Not configured: no or non-test `STRIPE_SECRET_KEY` (checkout and refunds), empty `STRIPE_WEBHOOK_SECRET` (webhook), or `/health` when the database cannot be reached |
+
+### Headers, CSP and the middleware
+
+`app/main.py` has one HTTP middleware, `protect_every_request`, written as plain steps: (1) a `Content-Length` above `MAX_BODY_BYTES` (1,000,000) gives 413 without reading the body (a chunked upload without `Content-Length` is not covered); (2) call the app; (3) add `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and `Permissions-Policy: camera=(), microphone=(), geolocation=()` to every response; (4) add the Content-Security-Policy to every response except paths starting with `/docs` or `/redoc` and `/openapi.json`.
+
+```
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self';
+form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'
+```
+
+- **Why `/docs` is excluded:** Swagger UI loads its scripts and styles from a CDN and runs an inline script, so the policy would break the page. The other four headers still apply there. (Checked in headless Chrome: `/docs` renders all 38 operations.)
+- **Why `img-src` allows `https:`:** a seller may use any `https://` image URL for a product (and the seed uses picsum.photos). Images cannot run script, so this is the one wide setting.
+- **No inline script or style anywhere:** the pages use `<script src>` and one stylesheet only, with no `on...=` attributes and no `style=` attributes (checked by search; the JS never touches `.style`). `data-requires-login` is a data attribute, not script.
+- **No HSTS** on purpose (it belongs behind HTTPS at deploy time).
+- **The 500 handler adds the same headers itself:** Starlette's `ServerErrorMiddleware` (which calls the `Exception` handler) wraps the user middleware, so a 500 response would not get them otherwise. The headers live in two constants (`SECURITY_HEADERS`, `CONTENT_SECURITY_POLICY`) used by both.
+- **No CORS middleware.** The frontend is served by this app (same origin). Nothing in the code base mentions CORS, and tests check that a request with an `Origin` header and an `OPTIONS` preflight never get `Access-Control-Allow-Origin`.
+
+### Exception handlers
+
+- `Exception`: `logger.exception(...)` (traceback in the log only), response `500 {"detail": "Internal server error"}`. Tests use `TestClient(app, raise_server_exceptions=False)` and check that no SQL, path, `Traceback` or exception text reaches the client.
+- `sqlalchemy.exc.DataError`: a value the database refused because of user input. An experiment with the installed versions (SQLAlchemy 2.1.4, psycopg 3.3.6) showed that **both** a NUL character in text (`psycopg.DataError`) and an out-of-range integer (`psycopg.errors.NumericValueOutOfRange`, a subclass of `DataError`) arrive as `sqlalchemy.exc.DataError`. The handler logs only the error class and answers `422 {"detail": "Invalid input"}`. It is a safety net: the schemas and path parameters have bounds, so normal bad input is stopped earlier with a precise 422.
+- `get_db` closes the session in a `finally`, so a failed request never leaks a connection or leaves a transaction open (a test checks that the pool has no checked-out connection after a `DataError`).
+- Every other error keeps FastAPI's normal `{"detail": ...}` shape.
+
+### Input bounds
+
+Every string has a `max_length` that fits its column and a sensible minimum, and every integer has `ge` and `le` that fit its column (int4 maximum 2,147,483,647). The M3 product schema and the M5 price filters were tightened to these caps.
+
+| Input | Limit |
+|---|---|
+| Names (user full name, address full name, product name) | 1 to 200 |
+| Category name | 1 to 100 (also needs a letter or digit) |
+| Descriptions (product 1 to 5000, category up to 5000) | 5000 |
+| Address lines, `line1` and `line2` | up to 200 |
+| City, state, country | 1 to 100 |
+| Phone | 1 to 20 |
+| Postal code | 1 to 12 |
+| Email | up to 255 (and a valid address) |
+| Register password | 8 to 72 characters (and at most 72 bytes, no NUL character) |
+| Login email / password | up to 255 / up to 128 (a password over 72 bytes, or with a NUL, is a 401) |
+| Image URL | `http://`, `https://` or `/static/images/`, up to 500 |
+| Search `q` / `category` slug | up to 100 / up to 100 |
+| Product `price` | 1 to 10,000,000 paise (₹1,00,000) |
+| Product `stock` | 0 to 1,000,000 |
+| `min_price`, `max_price` filters | 0 to 1,000,000,000 paise |
+| `page` | 1 to 100,000 |
+| `page_size` | 1 to 100 |
+| Cart `quantity` | 1 to 10 |
+| Every id in a path or body (`product_id`, `order_id`, `address_id`, `category_id`) | 1 to 2,147,483,647 |
+| Order total | at most 99,999,999 paise (`MAX_ORDER_TOTAL` in `checkout_service.py`) |
+| Request body | at most 1,000,000 bytes (by `Content-Length`) |
+| Webhook `metadata.order_id` | 1 to 9 ASCII digits, otherwise acknowledged with 200 and ignored |
+
+Pydantic's normal conversion still accepts a numeric string such as `"5"` for an integer field (strict mode would change the behaviour of every endpoint). A string that is not a number, a list, an object or `null` gives 422.
+
+**Money columns.** `products.price`, `order_items.unit_price`, `orders.total_amount` and `payments.amount` are all `INTEGER` (int4, up to 2,147,483,647). Largest values the app can write: a price is at most 10,000,000, a line is at most 10 units (cart limit), and the order total is refused above 99,999,999 **before anything is written** (the total is added up in Python, which has no overflow). `payments.amount` copies `total_amount`. So no allowed combination can reach the int4 limit, with a margin of more than 20 times. **No migration was needed.** (Before M10 a seller could set a price of 2,147,483,647 and a customer could buy several, which Python summed without trouble but Postgres would have refused with a 500. The new caps close that.)
+
+### Timing protection and token handling
+
+- **Login timing.** When the email does not exist, login still runs one `bcrypt.checkpw` against `DUMMY_PASSWORD_HASH`, a module constant made once with `bcrypt.gensalt()` (the same cost factor, 12 rounds, as real passwords). A test counts `bcrypt.checkpw` calls for a wrong password and for an unknown email and expects one each. The messages are identical.
+- **Tokens.** `jwt.decode(..., algorithms=["HS256"], options={"require": ["sub", "exp"]})`; the user is loaded from the database on every request, so `role` and `is_active` never come from the token. Every failure is the same 401.
+- **Passwords with a NUL character.** bcrypt silently stops reading a password at a NUL, so a password such as `Pass\0word` would have been stored as `Pass`. Register now refuses it (422) and login gives 401. Found by the NUL test of this milestone.
+- **JWT secret.** `JWT_SECRET: str = Field(min_length=32)` with no default. The app, Alembic and the tests fail at startup with a pydantic validation error when it is missing or short (`.env.example` holds the placeholder `REPLACE_ME`, which is too short on purpose).
+
+### Logging
+
+`main.py` calls `logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")` once. Searched the whole code base: log lines carry only ids, event types, outcomes, error class names and Stripe error codes. No password, token, authorization header, Stripe key, webhook secret, signature, request body or email is logged, and there is no `print` left (the seed script now reports through `logging`). The engine is created with `hide_parameters=True`, so a failed statement's values (a password hash, an email) never appear in SQLAlchemy's error text. A test (`test_webhooks.py::test_nothing_sensitive_is_logged`) still checks the webhook logs.
+
+### Accepted gaps (not built on purpose)
+
+- **No login rate limiting.** The next step would be a Postgres-based throttle or a reverse proxy.
+- **No token revocation and no refresh tokens.** A token lives for `JWT_EXPIRE_MINUTES`. (A disabled user is refused at once, because the user is loaded on every request.)
+- **Registration reveals whether an email exists** (409).
+- **The token lives in `localStorage`.** A cross-site scripting bug could read it. The mitigations are the CSP, `textContent`-only rendering and the short expiry. httpOnly cookies would need CSRF protection and are out of scope. CSRF does not apply to the API, because it uses a bearer header and not cookies.
+- **No HSTS / HTTPS** (deployment).
+- **Chunked uploads** without `Content-Length` are not limited by the 413 check.
+- **`img-src https:`** lets a page show an image from any https host (a seller's choice of image URL).
+- **`statement_timeout` also covers waiting for a row lock.** A request that waits more than 15 seconds for a lock fails with a generic 500. Locks are held for milliseconds, and the concurrency tests pass under the timeout.
+
+## Performance review (M10)
+
+Measured on Postgres 16 in the `db` container (default settings), with a temporary dataset inside a transaction that is rolled back, so nothing remains in the dev database (after the run: `VACUUM (FULL, ANALYZE)`, and the counts were products 120, users 5, orders 0, order_items 0, payments 0, carts 0, cart_items 0, addresses 2, categories 10, the same as before; the id sequences were set back to their old values, because Postgres does not roll them back).
+
+**Dataset** (`setup.sql`, plain SQL, kept outside the project): 200 customers, 50,000 products (alternating between the two seeded sellers, rotating through the categories, as in M5), 20,000 orders spread over the 200 customers (100 each, oldest first, one new minute per order) with the five statuses in turn (4,000 each), one payment per order (`succeeded` for paid, shipped and delivered; `pending` for pending_payment; `refunded` or `failed` for cancelled) and 3 order items per order (60,000, products from all over the table). Then `ANALYZE` of the five tables. The ids of the sample rows are looked up with `\gset` in the script.
+
+**Commands**
+
+```bash
+docker compose cp setup.sql db:/tmp/perf/setup.sql
+docker compose cp measure.sql db:/tmp/perf/measure.sql        # BEGIN; \i setup.sql; \gset variables; EXPLAIN (ANALYZE, BUFFERS) ... twice; ROLLBACK;
+docker compose exec -T db psql -U postgres ecommerce -f /tmp/perf/measure.sql
+docker compose exec -T db psql -U postgres ecommerce -c "VACUUM (FULL, ANALYZE)"
+docker compose exec -T db psql -U postgres ecommerce -c "select count(*) from products"   # must print 120
+```
+
+**The SQL is the real SQL.** A throwaway script (outside the project) ran the real repository functions on the same data inside a rolled back transaction and captured every statement they send (a `before_cursor_execute` listener; `selectinload` sends its own `... WHERE order_id IN (...)` query). The statements were copied into `measure.sql`, with the ids replaced by psql variables. Each statement ran twice; the table reports the second (warm) run. Index experiments (variants with different index sets, each created inside the rolled back transaction) were run first, to decide which indexes earn their place.
+
+**Results.** "Before" is the schema as of M9, "after" is with migration `e918e5dbff2d`.
+
+| Query (real SQL from the repository) | Plan before | Time before | Plan after | Time after |
+|---|---|---|---|---|
+| Customer order list, page (one user, newest first, limit 10) | Bitmap scan on `ix_orders_user_id` + sort of that user's 100 orders | 0.20 ms | Index scan on `ix_orders_user_id_created_at_id`, no sort | **0.035 ms** |
+| Customer order list, items of the page | **Seq Scan** on `order_items` (60,000 rows) | 5.25 ms | Bitmap scan on `ix_order_items_order_id` | **0.075 ms** |
+| Customer order list, count | Bitmap scan on the user index | 0.20 ms | Bitmap scan on the new user index | 0.20 ms (unchanged) |
+| Order detail: the order / the items / the payment | pkey / **Seq Scan** / unique index | 0.016 / 4.14 / 0.019 ms | pkey / index scan on `ix_order_items_order_id` / unique index | 0.016 / **0.013** / 0.014 ms |
+| Seller order list, page (limit 10) | Parallel hash joins that read **all** of orders, payments, order_items and products (the half of the products that belong to the seller), then a sort | 40.8 ms | Walks `ix_orders_created_at_id` newest first and checks each order through `payments_order_id_key`, `ix_order_items_order_id` and `products_pkey`; stops after 10 matches | **0.256 ms** |
+| Seller order list, items and products of the page | Seq Scan on `order_items` + pkey lookups | 5.99 ms | Bitmap scan on `ix_order_items_order_id` + pkey lookups | **0.103 ms** |
+| Seller order list, count | The same full parallel hash joins (every matching order must be counted) | 37.4 ms | Same full scan | 32.8 ms (still a full scan) |
+| Admin order list, no filter, page (limit 20) | Seq Scan on all 20,000 orders + hash join + sort | 13.6 ms | Walks `ix_orders_created_at_id`, nested loop to `users_pkey` | **0.068 ms** |
+| Admin order list, no filter, items of the page | Seq Scan on `order_items` | 5.54 ms | Bitmap scan on `ix_order_items_order_id` | **0.050 ms** |
+| Admin order list, no filter, count | Seq Scan on `orders` | 3.93 ms | Seq Scan on `orders` | 2.90 ms (unchanged) |
+| Admin order list, `status = 'paid'`, page | Bitmap scan on `ix_orders_status`, hash join, sort of 4,000 rows | 4.69 ms | Walks `ix_orders_created_at_id` and filters the status (1 in 5), nested loop to users | **0.101 ms** |
+| Admin order list, `status = 'paid'`, items of the page | Seq Scan on `order_items` | 5.31 ms | Bitmap scan on `ix_order_items_order_id` | **0.052 ms** |
+| Admin order list, `status = 'paid'`, count | Bitmap scan on `ix_orders_status` | 2.56 ms | Seq Scan on `orders` (the planner's choice) | 2.50 ms (unchanged) |
+| Cart read (5 lines) | pkey lookups for the products | 0.042 ms | same | 0.044 ms |
+| Stock lock, 3 products (`FOR UPDATE`) | `products_pkey` | 0.033 ms | same | 0.035 ms |
+| Stock restore (one `UPDATE products SET stock = stock + 1`) | `products_pkey` (2 foreign key triggers 0.05 ms) | 0.106 ms | same | 0.105 ms |
+| Order lock (`FOR UPDATE`) | `orders_pkey` | 0.020 ms | same | 0.018 ms |
+
+**Decisions**
+
+- Added (one migration, `e918e5dbff2d`, with a working downgrade; checked: `upgrade`, `downgrade -1`, `upgrade`, and `alembic check` reports no drift):
+  - `ix_order_items_order_id` on `order_items (order_id)`. Foreign keys do not get an index in Postgres. It fixed five sequential scans of 4 to 6 ms (they grow with the table), including the order detail page.
+  - `ix_orders_created_at_id` on `orders (created_at DESC, id DESC)`. The seller and admin lists went from a full scan and a sort (40.8 ms and 13.6 ms) to reading the first rows of the index (0.26 ms and 0.07 ms).
+  - `ix_orders_user_id_created_at_id` on `orders (user_id, created_at DESC, id DESC)`, which **replaces** `ix_orders_user_id` (dropped in the same migration; a leading `user_id` makes the old index redundant). It was added because the measurement showed a side effect of the previous index: with only the two indexes above, the planner started to walk the global `created_at` index for a customer's list and filter by user, which made that list slower (0.20 ms to 1.0 ms). With the composite index the customer list takes 0.035 ms and the plan no longer depends on guesses. A customer with one old order took 0.025 ms either way.
+- Considered and **not** added, because the measurement showed no gain:
+  - `order_items (product_id)`: no plan changed with it (the seller queries still take the same plan; the seller count stayed at 37 to 40 ms with and without it). Nothing deletes a product (soft delete), so the foreign key check never needs it.
+  - `addresses (user_id)` and `cart_items (product_id)`: the tables are tiny per user and no query is slow. They are the first candidates when the tables grow large. `cart_items (cart_id)` is already the left part of the unique constraint `uq_cart_items_cart_id_product_id`.
+  - `ix_orders_status` stays (the paid-orders count can use it); it is not used by the page queries any more.
+- **Still a full scan, on purpose:** `count(*)` queries (the seller count at about 33 ms for 20,000 orders is the slowest). A count has to visit every matching row, so an index cannot help. If it ever matters, the usual fixes are a cached or estimated total, or "next page" paging without a total; neither is in scope.
+- Already fast, left alone: the cart read, the stock lock and restore, the order lock and the order detail row.
+
+**Every index in the database, and why it exists**
+
+| Table | Index | Why |
+|---|---|---|
+| users | `users_pkey` (id) | primary key, `get_current_user` on every request |
+| users | `users_email_key` (email, unique) | login and duplicate-email check |
+| addresses | `addresses_pkey` | primary key |
+| categories | `categories_pkey`, `categories_name_key`, `categories_slug_key` | primary key, unique name and slug (the slug lookup of `?category=`) |
+| products | `products_pkey` | primary key, detail page, locks, order lines |
+| products | `ix_products_category_id` | category filter, foreign key |
+| products | `ix_products_price` | price range filter and price sort |
+| products | `ix_products_seller_id` | `/seller/products`, the seller checks of the order queries, foreign key |
+| products | `ix_products_search_vector` (GIN) | full-text search |
+| products | `ix_products_active_newest` (partial) | newest-first listing of active products |
+| carts | `carts_pkey`, `carts_user_id_key` (unique) | one cart per user, lookup by user |
+| cart_items | `cart_items_pkey`, `uq_cart_items_cart_id_product_id` | primary key; one line per product per cart, and lookup by cart |
+| orders | `orders_pkey` | primary key, order detail, `FOR UPDATE` lock |
+| orders | `ix_orders_user_id_created_at_id` | the customer's own order list (and the foreign key to users) |
+| orders | `ix_orders_created_at_id` | seller and admin order lists, newest first |
+| orders | `ix_orders_status` | status filter and count of the admin list |
+| order_items | `order_items_pkey` | primary key |
+| order_items | `ix_order_items_order_id` | loading the lines of an order, the seller EXISTS check, the foreign key |
+| payments | `payments_pkey` | primary key |
+| payments | `payments_order_id_key` (unique) | one payment per order, joins from orders |
+| payments | `payments_stripe_checkout_session_id_key` (unique) | the webhook finds the payment by session id |
+
+## Hardening and audit decisions (M10)
+
+**Fixed**
+- App-wide: size limit, security headers and CSP, 500 and `DataError` handlers (an unexpected error is a plain JSON 500; bad values that reach the database are 422), required `JWT_SECRET` of 32 or more characters, a 15 second `statement_timeout` (constant `STATEMENT_TIMEOUT_MS` in `db.py`; the tests' engine uses the same value; `pool_pre_ping` was already on), `hide_parameters=True`, one logging format, no `print`.
+- Auth: dummy-hash login check, NUL in passwords, an upper limit on login email and password length.
+- Input bounds on every schema, path and query (see the table above); product price and stock caps; `min_price`/`max_price` cap 1,000,000,000; `page` cap 100,000; `category` slug length. The frontend forms got the same limits (`maxlength`, the price and stock checks in the seller product form, the price filter on the products page).
+- Checkout total cap (`MAX_ORDER_TOTAL`, step f2, 409, nothing written). Webhook `metadata.order_id` is now 1 to 9 digits (before: up to 10 digits and at most 2,147,483,647).
+- Indexes (see the performance review).
+- Frontend audit (searched every HTML and JS file): no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `new Function`, `setAttribute("on...")` or `setAttribute("style")`; no inline event attributes, inline scripts or styles, `style=""` attributes or `javascript:` URLs; no `target="_blank"` anywhere; no `http://` URL except the XML namespace inside `placeholder.svg`; no `console.*`, `alert`, `debugger` or TODO. Fixed: the `next` redirect check is now the same condition in `login.js`, `register.js` and `addresses.js`; error and status areas are live regions (`role="alert"` on error paragraphs and `aria-live="polite"` on the areas that show loading, empty and error states); a `data:` favicon link on every page (the browser's automatic `/favicon.ico` request was a console error); new `frontend/404.html`. The checkout redirect still accepts only `https://checkout.stripe.com/`.
+- Accessibility pass (by reading, no tooling): every form control has a `<label>` or `aria-label` (checkbox and radio inputs sit inside their label), every image has `alt`, every page has `<title>`, `lang="en"` and exactly one `<h1>` (on the product, order and seller/admin order pages the JS creates it), buttons are `<button>` elements.
+- Code audit: no helper functions and no same-layer calls in `routers`, `services` or `repositories` (checked with a throwaway `ast` script: the only module-level functions outside the layers are the `get_db` dependency, the four `core/dependencies.py` dependencies, `health` and the three functions of `main.py` that this milestone allows). One violation found and fixed: `order_service.py` used `sorted(..., key=lambda ...)` four times; the order lines now come back sorted from `Order.items = relationship(order_by="OrderItem.id")`. Removed: unused imports (`text`, `joinedload`, an unused `Address` import in a test), the two stale `.gitkeep` files, and the `print` calls in `seed.py`. The JS files each hold one page function (plus `apiRequest`, `buildProductCard`, `showLayout` and `loadCart`); the event callbacks are the browser's own way of working. No unused CSS class is left (the `badge-*` classes are built from the status in the JS).
+- `pip-audit` (run once, not added to `requirements.txt`): see below.
+- Docker: non-root user (uid 1000), `.dockerignore`, a healthcheck on the app, Postgres port closed.
+
+**Left as it is, and why**
+- `GET /products?q=%00` answers **200 with an empty list**, not a 4xx: the behaviour rule of this milestone says a search with bad characters is "a normal empty result", and the M5 rule already stripped NUL characters. It is never a 500.
+- Numeric strings (`"5"`) are accepted for integer fields (Pydantic's normal conversion).
+- `models/order.py` and `models/cart.py` use `Mapped["Product"]` as a string annotation without importing `Product` (pyflakes reports "undefined name"). SQLAlchemy resolves the name from its registry at runtime, it works, and adding `TYPE_CHECKING` imports would be extra code for no gain.
+- `app/models/__init__.py` imports every model without using it on purpose (Alembic and `Base.metadata` need them registered).
+- The count queries (full scans), the missing `addresses (user_id)`, `cart_items (product_id)` and `order_items (product_id)` indexes: see the performance review.
+- No rate limiting, token revocation, refresh tokens or httpOnly cookies (out of scope, see the accepted gaps).
+- The `pip` that ships in the `python:3.12-slim` image (25.0.1) has known issues; see the pip-audit result.
+- CLAUDE.md rules were not changed. Its facts were brought up to date: the project folder is called `ecom/` (the file said `ecommerce/`), the router list (it said `auth, products, categories, cart, orders, webhooks, admin`; the real ones add `users` and `seller_orders`), the extra files (`seed.py`, `README.md`, `.dockerignore`, `alembic.ini`, `pytest.ini`, `404.html`), the settings list (`TEST_DATABASE_URL`, `JWT_EXPIRE_MINUTES`, the 32 character rule), the order total cap and the real expiry (30 minutes plus one) in the checkout rules, and the `--events` flag of `stripe listen`. The order statuses, payment statuses (with `refunded`), the endpoints and the seller rule already matched.
+- Compared the endpoint table with the live `/openapi.json` (38 operations): method and path sets are identical, and the access column matches the inventory above.
+
+**Stability**
+- The full suite was run three times in a row and the three concurrency files (`test_checkout_concurrency.py`, `test_webhooks_concurrency.py`, `test_order_lifecycle_concurrency.py`) twenty times in a row; see "Test results" below.
+
+### Test results (M10)
+
+- **299 tests pass** (213 before M10; 86 new: `test_endpoint_security.py` 36, `test_hardening.py` 20, `test_coverage_gaps.py` 14, `test_idor.py` 8, `test_no_leaks.py` 3, `test_query_counts.py` 3, `test_full_flow.py` 1, `test_frontend_files.py` +1).
+- **Stability.** The full suite ran three times in a row: 299 passed each time (about 57 seconds each). The three concurrency files (`test_checkout_concurrency.py`, `test_webhooks_concurrency.py`, `test_order_lifecycle_concurrency.py`, 8 tests) ran 20 times in a row: 8 passed every time. Nothing failed, so nothing needed fixing in this step. (During the work itself the new tests failed a few times because of mistakes in the tests, for example a route added after the `/` mount answering 404, a URL longer than httpx allows, and the NUL password case that exposed the real bcrypt problem described above; all were fixed before the runs.)
+- **Statement counts** (`test_query_counts.py`): `GET /products`, `/cart`, `/orders`, `/seller/orders` and `/admin/orders` send the same number of SQL statements for 2 rows and for 12 rows. No endpoint needed a fix (they already used `joinedload` and `selectinload`).
+- **Coverage** (`pytest --cov=app --cov-report=term-missing`, 299 passed). Per layer, statements covered:
+
+  | Layer | Statements | Covered |
+  |---|---|---|
+  | services | 730 | **99.6%** (the 3 missed lines are in `webhook_service.py`: a payment whose order row disappeared between two queries, which the foreign key makes impossible) |
+  | routers | 189 | 100% |
+  | repositories | 214 | 100% |
+  | schemas | 238 | 100% |
+  | models | 129 | 100% |
+  | core (`config.py`, `dependencies.py`) | 46 | 100% |
+  | `main.py` and `db.py` | 68 | 100% |
+  | `seed.py` (a script that runs when imported; used by hand in the README steps and the fresh-clone check) | 45 | 0% |
+  | **Total** | 1,659 | 97% (99.8% without `seed.py`) |
+
+  Before the new tests of this milestone were added, the first run of the coverage report showed 96%, with services at 91 to 100% per file; the 14 tests in `test_coverage_gaps.py` cover the error and permission branches that were missing (registration race, passwords over 72 bytes, sold-out cart changes, empty category slug, category delete race, retry refund without a payment intent, cancel without a test key, the inline role check of the status service, a webhook without a session id, a late payment without a payment intent, `get_db` closing the session, `/health` with the database down).
+- **Fresh clone check (the README, step by step).** After `docker compose down -v` for this project, the repository was cloned into a temporary folder (the local repository, with this milestone's uncommitted files copied over it, since a clone of the committed state would not contain them), and the README was followed: `cp .env.example .env`, `openssl rand -hex 32` into `JWT_SECRET`, the Stripe test key, `docker compose up --build`, `alembic upgrade head` (all four migrations ran), `python -m app.seed` ("Seeded 5 users, 10 categories and 120 products"), the site and `/health` answered, `stripe listen --events ... --forward-to ...` printed the signing secret, which was copied into `.env` before `docker compose up -d --force-recreate app`, then a customer paid with 4242 on the real Stripe page and the success page said "Payment received". Then, in the same copy: `docker compose exec app pytest` (299 passed), the coverage command (97%), the 20-run concurrency loop of the README (20 of 20 passed), `docker compose exec --user "$(id -u):$(id -g)" app alembic current`, `docker compose exec db psql ... -c "select 1"`, `stripe events resend <event id>` (pending_webhooks 2) and the "run without reload" command (`/health` answered 200, no reload line in its log). The full browser flow of the previous bullet was run against this copy as well. The copy was stopped with `docker compose down -v` afterwards, and the real project was started again, migrated and seeded (the dev database is in its seeded state; `orders_id_seq` was set to 7100 because Stripe remembers the idempotency keys `order-<id>` of earlier test payments). **Steps that needed a change:** (1) the README's first checkout failed with "Payment service is unavailable" because the fresh database numbered the first order 1 and this Stripe account had already used the key `order-1`; the failure path worked as designed (order cancelled, stock and cart restored), and the README now has a troubleshooting item with the `setval` command; (2) the README said to pass the key to `stripe listen` with `--api-key`, but what was actually run is the `STRIPE_API_KEY` environment variable (or `stripe login`), so the README now says that; (3) the no-reload command needs a few seconds for the database, now noted. The clone used the local repository, not the GitHub URL written in the README, which could not show this milestone's files before they are pushed.
+- **Checked by hand** (headless Chrome driven with Playwright from a temporary virtual environment outside the project; Stripe CLI 1.53.1 downloaded from the official GitHub release into a temporary folder, SHA-256 checked against the published checksum file): one full run with a real `sk_test_` key and `stripe listen`: browse, category, search, register, logout and login, add to cart, add an address, cart, checkout, the real Stripe page paid with 4242 (a webhook through `stripe listen` made the success page say "Payment received"), My Orders, order detail, cancel of the paid order (status Refunded), seller dashboard (products, product form, orders, order detail), admin dashboard (orders, order detail, users) and the 404 page: **no CSP violation and no console error** on any of our pages. The only two console lines were the browser's automatic `/favicon.ico` request (fixed with the `data:` icon link) and the deliberate 404 for the unknown page. With the product image hosts blocked, every product card showed `placeholder.svg`. `/docs` rendered all 38 operations. The curl checks: `curl -I /` shows the four headers and the CSP; `GET /products/99999999999` gives 422; `GET /products?q=%00` gives 200 with an empty list; `POST /auth/register` with `\u0000` in the name gives 422; `POST /cart/items` with `product_id` 99999999999 gives 422; none gives a 500.
+
+### pip-audit result
+
+`python -m pip_audit -r requirements.txt --no-deps` (installed in the container with `pip install --user`, never added to `requirements.txt`): **No known vulnerabilities found** in the pinned packages. `python -m pip_audit` on the whole container environment (every transitive package) found issues only in `pip` itself (25.0.1 in the `python:3.12-slim` base image, fixed in 26.x). `pip` is only the installer used when the image is built; it is not in `requirements.txt` and is not used by the running app. It was **not** upgraded (a minor version jump of the base image's tooling, not a safe patch-level change). Run it again at deploy time.
+
+## Docker (M10)
+
+- `Dockerfile`: `python:3.12-slim`, `PYTHONDONTWRITEBYTECODE=1` and `PYTHONUNBUFFERED=1`, a user `appuser` with uid 1000, the code copied with `--chown`, `USER appuser`. The live-reload bind mount (`.:/app`) works because uid 1000 is also the usual first user on a Linux host (it was checked: files written by the container into the project folder belong to the host user, and uvicorn `--reload` still restarts on edits). With a different host user id the container can still read and reload; to create files from inside it, run `docker compose exec --user "$(id -u):$(id -g)" app ...`.
+- `.dockerignore`: `.env`, `.git`, caches, `.coverage` and virtualenvs.
+- `docker-compose.yml`: the app has a healthcheck (`python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"`, every 10 seconds; `docker compose ps` shows `healthy`). The `db` service has **no `ports:`** entry, so Postgres is closed to the outside (use `docker compose exec db psql ...`).
+- The dev compose file keeps `--reload`. To run without it: `docker compose run --rm --service-ports app uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+- `pytest-cov==7.1.0` was added to `requirements.txt` (the only new package).
+
+## Future work
+
+- **Reviews and ratings** (deferred on purpose; CLAUDE.md says not to create tables, endpoints or UI yet). A sketch of what it needs:
+  - Tables: `reviews` (`id`, `product_id` FK, `user_id` FK, `rating` with `CHECK (rating BETWEEN 1 AND 5)`, `title`, `body`, `created_at`, `updated_at`, `UNIQUE (product_id, user_id)` so one review per buyer per product), indexed on `(product_id, created_at DESC)`.
+  - Endpoints: `POST /products/{id}/reviews` (customer only; the service checks that the buyer **received** the product, with an `EXISTS` over their `delivered` orders and `order_items`, otherwise 403), `PUT` and `DELETE` of one's own review (404 for someone else's), `GET /products/{id}/reviews` (public, paginated), and an admin delete for moderation. Every new endpoint goes into the inventory test.
+  - Average rating: keep `rating_count` and `rating_sum` on `products`, changed in the same transaction as the review (with the product row locked, like stock edits), so lists never need an aggregate query or a query per product; `average = rating_sum / rating_count` is computed in the service. A `sort=rating` option for `GET /products` would use an index on the stored average.
+  - UI: stars on the product card and the product page, a review list, a review form shown only to eligible buyers, all text through `textContent` (reviews are user content, the CSP and the no-`innerHTML` rule stay), accessible star input (radio buttons with labels).
+- Login rate limiting (a Postgres-based throttle or a reverse proxy), token revocation and refresh tokens
+- Email notifications (order confirmation, shipment)
+- Returns and partial refunds
+- Per-item fulfilment (one status per order today, so a mixed order needs an admin)
+- Other payment methods (asynchronous methods need the `async_payment_*` events)
+- A very small order total can be rejected by Stripe (minimum charge); the order is then cancelled and the cart restored
+- Deployment: HTTPS and the HSTS header, a production server setup, secrets management, backups, monitoring
 
 ## Key design decisions (M6)
 

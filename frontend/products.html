@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Products</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -14,7 +15,7 @@
       <!-- Sidebar: category links and the filter form (filled by products.js) -->
       <aside class="filter-sidebar">
         <h2>Categories</h2>
-        <div id="category-links-area"><p class="state-loading">Loading...</p></div>
+        <div id="category-links-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
 
         <h2>Filters</h2>
         <!-- Prices here are in rupees. products.js converts them to paise for the API. -->
@@ -50,10 +51,10 @@
         <p id="product-count" class="product-count"></p>
 
         <!-- A problem with the price filters (filled by products.js) -->
-        <div id="filter-message-area"></div>
+        <div id="filter-message-area" aria-live="polite"></div>
 
         <!-- Product cards (filled by products.js) -->
-        <div id="products-area"><p class="state-loading">Loading...</p></div>
+        <div id="products-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
 
         <!-- Previous / Next (filled by products.js) -->
         <div id="pagination-area"></div>

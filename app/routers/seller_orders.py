@@ -18,7 +18,7 @@ router = APIRouter(prefix="/seller/orders", tags=["seller orders"])
 
 @router.get("", response_model=SellerOrderListResponse)
 def list_orders(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     seller: User = Depends(require_seller),
     db: Session = Depends(get_db),

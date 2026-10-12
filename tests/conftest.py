@@ -16,7 +16,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.db import get_db
+from app.db import STATEMENT_TIMEOUT_MS, get_db
 from app.main import app
 from app.models.cart import Cart, CartItem
 from app.models.catalog import Category, Product
@@ -59,7 +59,11 @@ def test_engine():
     command.upgrade(alembic_config, "head")
 
     # Create an engine that points at the test database
-    engine = create_engine(settings.TEST_DATABASE_URL)
+    # (same statement timeout as the real engine in app/db.py, so the tests run under the same rules)
+    engine = create_engine(
+        settings.TEST_DATABASE_URL,
+        connect_args={"options": "-c statement_timeout=" + str(STATEMENT_TIMEOUT_MS)},
+    )
     yield engine
     engine.dispose()
 

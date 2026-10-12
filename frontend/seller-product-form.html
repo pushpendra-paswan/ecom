@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Product</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-requires-login="true">
@@ -13,7 +14,7 @@
     <h1 id="form-heading">Add product</h1>
 
     <!-- Loading and error messages (filled by seller-product-form.js) -->
-    <div id="form-status"><p class="state-loading">Loading...</p></div>
+    <div id="form-status" aria-live="polite"><p class="state-loading">Loading...</p></div>
 
     <form id="product-form" class="product-form" hidden novalidate>
       <label for="product-name">Name</label>
@@ -39,7 +40,7 @@
         <span>Active (shown in the store)</span>
       </label>
 
-      <p id="form-error" class="error-message" hidden></p>
+      <p id="form-error" class="error-message" role="alert" hidden></p>
 
       <div class="form-buttons">
         <button type="submit" id="product-submit-button">Save product</button>

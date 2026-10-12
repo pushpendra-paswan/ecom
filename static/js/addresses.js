@@ -213,8 +213,11 @@ async function loadAddressesPage() {
         await apiRequest("/users/me/addresses", "POST", body);
 
         // After adding, go to the "next" page if there is a safe one (the same check as login.js)
-        const nextPath = new URLSearchParams(window.location.search).get("next");
-        if (nextPath !== null && nextPath.startsWith("/") && !nextPath.startsWith("//") && !nextPath.includes("\\") && !/[\u0000-\u001f]/.test(nextPath)) {
+        let nextPath = new URLSearchParams(window.location.search).get("next");
+        if (nextPath === null || !nextPath.startsWith("/") || nextPath.startsWith("//") || nextPath.includes("\\") || /[\u0000-\u001f]/.test(nextPath)) {
+          nextPath = null;
+        }
+        if (nextPath !== null) {
           window.location.href = nextPath;
           return;
         }

@@ -48,10 +48,10 @@ class CreateProductRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=5000)
-    # Price in paise
-    price: int = Field(gt=0)
-    stock: int = Field(ge=0)
-    category_id: int
+    # Price in paise: at most 10,000,000 (Rs 1,00,000). Stock: at most 1,000,000.
+    price: int = Field(gt=0, le=10_000_000)
+    stock: int = Field(ge=0, le=1_000_000)
+    category_id: int = Field(ge=1, le=2147483647)
     # Either a full http(s) URL or a file under static/images/
     image_url: str | None = Field(default=None, pattern=r"^(https?://|/static/images/)", max_length=500)
     is_active: bool = True
@@ -66,8 +66,8 @@ class UpdateProductRequest(BaseModel):
     # where null removes the image).
     name: str = Field(default=None, min_length=1, max_length=200)
     description: str = Field(default=None, min_length=1, max_length=5000)
-    price: int = Field(default=None, gt=0)
-    stock: int = Field(default=None, ge=0)
-    category_id: int = Field(default=None)
+    price: int = Field(default=None, gt=0, le=10_000_000)
+    stock: int = Field(default=None, ge=0, le=1_000_000)
+    category_id: int = Field(default=None, ge=1, le=2147483647)
     image_url: str | None = Field(default=None, pattern=r"^(https?://|/static/images/)", max_length=500)
     is_active: bool = Field(default=None)

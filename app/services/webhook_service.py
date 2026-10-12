@@ -60,12 +60,12 @@ def handle_stripe_event(db: Session, payload: bytes, signature_header: str | Non
         # after the Stripe session exists, which leaves the payment without a session id.
         if payment is None:
             order_id_text = metadata.get("order_id")
+            # 1 to 9 ASCII digits: a bigger number would be a database error that Stripe retries for days
             is_whole_number = (
                 isinstance(order_id_text, str)
                 and order_id_text.isascii()
                 and order_id_text.isdigit()
-                and len(order_id_text) <= 10
-                and int(order_id_text) <= 2147483647
+                and 1 <= len(order_id_text) <= 9
             )
             if not is_whole_number:
                 logger.warning(

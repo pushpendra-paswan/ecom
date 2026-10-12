@@ -1,5 +1,5 @@
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.catalog import Product
 from app.models.order import Order, OrderItem, Payment

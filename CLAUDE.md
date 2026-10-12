@@ -60,23 +60,29 @@ Do not put business logic in routers or repositories.
 ## Project structure
 
 ```
-ecommerce/
+ecom/                    # the project folder (called ecommerce/ in the first draft of this file)
 ├── app/
-│   ├── main.py
+│   ├── main.py          # app, security headers, error handlers, /health, static and page mounts
 │   ├── db.py
+│   ├── seed.py          # demo data: python -m app.seed
 │   ├── models/          # SQLAlchemy models
 │   ├── schemas/         # Pydantic request/response schemas
-│   ├── routers/         # auth, products, categories, cart, orders, webhooks, admin
+│   ├── routers/         # auth, users, admin, categories, products, cart, orders, seller_orders, webhooks
 │   ├── services/        # business logic, transactions, Stripe calls
 │   ├── repositories/    # database queries
-│   └── core/            # config, security, dependencies
-├── alembic/
+│   └── core/            # config, dependencies (the bcrypt and JWT code is inline in auth_service.py and dependencies.py)
+├── alembic/             # env.py and versions/
 ├── static/              # css, js, images
-├── frontend/            # HTML pages
+├── frontend/            # HTML pages (including 404.html)
 ├── tests/
+├── alembic.ini
+├── pytest.ini
+├── Dockerfile
+├── .dockerignore
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
+├── README.md
 ├── CLAUDE.md
 └── PROJECT_CONTEXT.md
 ```
@@ -84,7 +90,7 @@ ecommerce/
 ## Configuration
 
 All settings come from environment variables, read in one config file in `core/`:
-`DATABASE_URL`, `JWT_SECRET`, `STRIPE_SECRET_KEY` (`sk_test_...`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY`, `FRONTEND_BASE_URL`.
+`DATABASE_URL`, `TEST_DATABASE_URL`, `JWT_SECRET` (required, at least 32 characters), `JWT_EXPIRE_MINUTES`, `STRIPE_SECRET_KEY` (`sk_test_...`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY`, `FRONTEND_BASE_URL`.
 
 Never commit secrets. Keep `.env` in `.gitignore` and maintain `.env.example`.
 
@@ -115,14 +121,14 @@ In one database transaction:
 
 1. Lock the product rows with `SELECT ... FOR UPDATE`
 2. Verify stock for every cart item
-3. Create the order with status `pending_payment`, plus order items with price snapshots
+3. Create the order with status `pending_payment`, plus order items with price snapshots (the order total may not be above 99,999,999 paise, Stripe's limit: otherwise roll back and answer 409)
 4. Decrement stock (this reserves it for the buyer)
 5. Create a `payments` row with status `pending`
 6. Clear the cart
 
 Then, after the commit:
 
-7. Create a Stripe Checkout Session. The line items and amounts come from the order in our database, never from the client. Set an expiry of 30 minutes and use the order id as the idempotency key.
+7. Create a Stripe Checkout Session. The line items and amounts come from the order in our database, never from the client. Set an expiry of 30 minutes (the code adds one minute, because Stripe wants at least 30 minutes) and use the order id as the idempotency key (`order-<id>`).
 8. Save the session id on the `payments` row and return the Stripe session URL.
 
 If creating the Stripe session fails, cancel the order and restore stock in one transaction.
@@ -172,7 +178,7 @@ Two buyers must never be able to buy the last item.
 ## Local Stripe setup
 
 1. Use a Stripe account in test mode and put the test secret key in `.env`.
-2. Run `stripe listen --forward-to localhost:8000/webhooks/stripe` on the host.
+2. Run `stripe listen --forward-to localhost:8000/webhooks/stripe` on the host (the README adds `--events checkout.session.completed,checkout.session.expired`, the only two events the app handles).
 3. Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
 4. Pay with the test card `4242 4242 4242 4242`, any future expiry date and any CVC.
 

@@ -7,13 +7,13 @@ class AddressRequest(BaseModel):
     # Used for both create (POST) and update (PUT)
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    full_name: str = Field(min_length=1, max_length=255)
-    phone: str = Field(min_length=1, max_length=30)
-    line1: str = Field(min_length=1, max_length=255)
-    line2: str | None = Field(default=None, max_length=255)
+    full_name: str = Field(min_length=1, max_length=200)
+    phone: str = Field(min_length=1, max_length=20)
+    line1: str = Field(min_length=1, max_length=200)
+    line2: str | None = Field(default=None, max_length=200)
     city: str = Field(min_length=1, max_length=100)
     state: str = Field(min_length=1, max_length=100)
-    postal_code: str = Field(min_length=1, max_length=20)
+    postal_code: str = Field(min_length=1, max_length=12)
     country: str = Field(default="India", min_length=1, max_length=100)
     is_default: bool = False
 

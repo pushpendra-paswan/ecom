@@ -20,6 +20,7 @@ def test_frontend_files_are_served(client):
         "/admin-orders.html",
         "/admin-order.html",
         "/admin-users.html",
+        "/404.html",
         "/static/css/style.css",
         "/static/js/api.js",
         "/static/js/layout.js",
@@ -48,3 +49,15 @@ def test_frontend_files_are_served(client):
     for path in paths:
         response = client.get(path)
         assert response.status_code == 200, path
+
+
+def test_unknown_page_shows_the_404_page(client):
+    # An unknown path under / gives status 404 with the friendly page (the StaticFiles mount serves 404.html)
+    response = client.get("/this-page-does-not-exist.html")
+    assert response.status_code == 404
+    assert "Page not found" in response.text
+    assert 'id="site-header"' in response.text
+    assert 'id="site-footer"' in response.text
+
+    # The page is also served on its own
+    assert client.get("/404.html").status_code == 200

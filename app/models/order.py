@@ -22,7 +22,6 @@ class Order(Base):
             name="ck_orders_status",
         ),
         CheckConstraint("total_amount >= 0", name="ck_orders_total_amount_not_negative"),
-        Index("ix_orders_user_id", "user_id"),
         Index("ix_orders_status", "status"),
     )
 
@@ -53,7 +52,8 @@ class Order(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    items: Mapped[list["OrderItem"]] = relationship()
+    # The lines always come back in the order they were created
+    items: Mapped[list["OrderItem"]] = relationship(order_by="OrderItem.id")
     payment: Mapped["Payment | None"] = relationship()
 
 
@@ -62,6 +62,8 @@ class OrderItem(Base):
     __table_args__ = (
         CheckConstraint("unit_price > 0", name="ck_order_items_unit_price_positive"),
         CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"),
+        # Postgres does not index foreign keys by itself. Every order page loads its lines by order_id.
+        Index("ix_order_items_order_id", "order_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -107,3 +109,13 @@ class Payment(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+# Newest-first order lists (the seller and admin dashboards) read the first rows of this index instead of
+# sorting every order (measured in PROJECT_CONTEXT.md, "Performance review")
+Index("ix_orders_created_at_id", Order.created_at.desc(), Order.id.desc())
+
+# The customer's own order list (newest first). The user_id column comes first, so this index also does the
+# job of the old ix_orders_user_id, which was dropped. Without it the planner sometimes walked the index
+# above for a customer's list (measured: 0.2 ms became 1.0 ms), with it the list takes 0.04 ms.
+Index("ix_orders_user_id_created_at_id", Order.user_id, Order.created_at.desc(), Order.id.desc())

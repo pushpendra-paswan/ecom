@@ -112,6 +112,7 @@ async function loadCheckoutPage() {
   // The message area and the pay button
   const messageArea = document.createElement("div");
   messageArea.className = "checkout-message";
+  messageArea.setAttribute("role", "alert");
   messageArea.hidden = true;
   const payButton = document.createElement("button");
   payButton.type = "button";

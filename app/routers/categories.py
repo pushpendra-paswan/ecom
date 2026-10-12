@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Path, Response
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_admin
@@ -26,8 +26,8 @@ def create_category(
 
 @router.put("/{category_id}", response_model=CategoryResponse)
 def update_category(
-    category_id: int,
     request: CategoryRequest,
+    category_id: int = Path(ge=1, le=2147483647),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -36,7 +36,7 @@ def update_category(
 
 @router.delete("/{category_id}", status_code=204)
 def delete_category(
-    category_id: int,
+    category_id: int = Path(ge=1, le=2147483647),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

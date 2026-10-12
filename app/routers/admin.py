@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/users", response_model=UserListResponse)
 def list_users(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -31,7 +31,7 @@ def list_users(
 @router.get("/orders", response_model=AdminOrderListResponse)
 def list_orders(
     status: Literal["pending_payment", "paid", "shipped", "delivered", "cancelled"] | None = Query(None),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),

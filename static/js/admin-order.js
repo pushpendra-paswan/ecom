@@ -165,6 +165,7 @@ async function loadAdminOrderPage() {
   actionArea.className = "order-actions";
   const actionMessage = document.createElement("p");
   actionMessage.className = "error-message";
+  actionMessage.setAttribute("role", "alert");
   actionMessage.hidden = true;
   actionArea.append(actionMessage);
 

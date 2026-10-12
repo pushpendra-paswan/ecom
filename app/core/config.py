@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,8 +10,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     TEST_DATABASE_URL: str
 
-    # Auth (tokens are signed with HS256)
-    JWT_SECRET: str = ""
+    # Auth (tokens are signed with HS256). Required, at least 32 characters, so the app (and Alembic)
+    # refuses to start with a missing or weak secret. Generate one with: openssl rand -hex 32
+    JWT_SECRET: str = Field(min_length=32)
     JWT_EXPIRE_MINUTES: int = 60
 
     # Stripe (empty until M7)
@@ -24,7 +26,3 @@ class Settings(BaseSettings):
 
 # One settings object shared by the whole app
 settings = Settings()
-
-# Refuse to start without a JWT secret, because an empty secret would let anyone forge tokens
-if settings.JWT_SECRET == "":
-    raise RuntimeError("JWT_SECRET is empty. Generate one with: openssl rand -hex 32")

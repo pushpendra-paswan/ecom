@@ -124,10 +124,10 @@ async function loadProductFormPage() {
       problem = "Please enter a name.";
     } else if (description === "") {
       problem = "Please enter a description.";
-    } else if (priceText === "" || !Number.isFinite(Number(priceText)) || Number(priceText) <= 0 || price < 1 || price > 2147483647) {
-      problem = "The price must be a number above 0.";
-    } else if (!/^[0-9]+$/.test(stockText) || Number(stockText) > 2147483647) {
-      problem = "The stock must be a whole number of 0 or more.";
+    } else if (priceText === "" || !Number.isFinite(Number(priceText)) || Number(priceText) <= 0 || price < 1 || price > 10000000) {
+      problem = "The price must be a number above 0 and at most 100000 rupees.";
+    } else if (!/^[0-9]+$/.test(stockText) || Number(stockText) > 1000000) {
+      problem = "The stock must be a whole number from 0 to 1000000.";
     } else if (categorySelect.value === "") {
       problem = "Please choose a category.";
     }

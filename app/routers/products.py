@@ -20,7 +20,7 @@ router = APIRouter(tags=["products"])
 
 @router.get("/seller/products", response_model=ProductListResponse)
 def list_my_products(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     seller: User = Depends(require_seller),
     db: Session = Depends(get_db),
@@ -45,19 +45,19 @@ def list_products(
         description="Search text for the name and description. Words are matched whole (with stems). "
         'Supports "quoted phrases", or, and -excluded words.',
     ),
-    category: str | None = Query(None, description="Category slug. An unknown slug returns 404."),
+    category: str | None = Query(None, max_length=100, description="Category slug. An unknown slug returns 404."),
     min_price: int | None = Query(
-        None, ge=0, le=2147483647, description="Lowest price in paise (inclusive, at most 2147483647)"
+        None, ge=0, le=1_000_000_000, description="Lowest price in paise (inclusive, at most 1,000,000,000)"
     ),
     max_price: int | None = Query(
-        None, ge=0, le=2147483647, description="Highest price in paise (inclusive, at most 2147483647)"
+        None, ge=0, le=1_000_000_000, description="Highest price in paise (inclusive, at most 1,000,000,000)"
     ),
     in_stock: bool = Query(False, description="true shows only products with stock above 0"),
     sort: Literal["relevance", "newest", "price_asc", "price_desc", "name_asc"] | None = Query(
         None,
         description="Default is relevance when q is given, otherwise newest. relevance needs q.",
     ),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100000),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
@@ -67,7 +67,7 @@ def list_products(
 
 
 @router.get("/products/{product_id}", response_model=ProductResponse)
-def read_product(product_id: int, db: Session = Depends(get_db)):
+def read_product(product_id: int = Path(ge=1, le=2147483647), db: Session = Depends(get_db)):
     return product_service.get_public_product(db, product_id)
 
 
@@ -82,8 +82,8 @@ def create_product(
 
 @router.patch("/products/{product_id}", response_model=ProductResponse)
 def update_product(
-    product_id: int,
     request: UpdateProductRequest,
+    product_id: int = Path(ge=1, le=2147483647),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -92,7 +92,7 @@ def update_product(
 
 @router.delete("/products/{product_id}", status_code=204)
 def delete_product(
-    product_id: int,
+    product_id: int = Path(ge=1, le=2147483647),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

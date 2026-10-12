@@ -23,6 +23,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # The image has no curl, so the check uses python. urlopen raises on any non-2xx answer.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   postgres_data:

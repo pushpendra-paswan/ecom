@@ -1,10 +1,15 @@
 # Fills the database with demo data. Run with: python -m app.seed
+import logging
 import re
 
 import bcrypt
 
 from app.db import SessionLocal
 from app.models import Address, Category, Product, User
+
+# This script reports what it did through the log (INFO lines), like the rest of the app
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # Dev password used by every demo account
 DEV_PASSWORD = "Password@123"
@@ -182,7 +187,7 @@ try:
     # Stop if the database was already seeded
     existing_category = db.query(Category).first()
     if existing_category is not None:
-        print("Categories already exist. The database is already seeded, nothing was changed.")
+        logger.info("Categories already exist. The database is already seeded, nothing was changed.")
         raise SystemExit(0)
 
     # Hash the dev password once with bcrypt
@@ -247,7 +252,7 @@ try:
 
     # Save everything
     db.commit()
-    print(f"Seeded {len(USERS)} users, {len(CATEGORIES)} categories and {product_number} products.")
+    logger.info("Seeded %s users, %s categories and %s products.", len(USERS), len(CATEGORIES), product_number)
 except Exception:
     db.rollback()
     raise

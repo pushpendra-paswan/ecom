@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Your addresses</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-requires-login="true">
@@ -13,27 +14,27 @@
     <h1>Your addresses</h1>
 
     <!-- Errors from changes (filled by addresses.js) -->
-    <p id="address-message" class="error-message" hidden></p>
+    <p id="address-message" class="error-message" role="alert" hidden></p>
 
     <div class="addresses-layout">
       <!-- The saved addresses (filled by addresses.js) -->
-      <div id="address-list-area"><p class="state-loading">Loading...</p></div>
+      <div id="address-list-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
 
       <!-- The form is used for adding and for editing -->
       <div class="address-form-card">
         <h2 id="address-form-heading">Add an address</h2>
         <form id="address-form">
           <label for="address-full-name">Full name</label>
-          <input type="text" id="address-full-name" maxlength="255" required>
+          <input type="text" id="address-full-name" maxlength="200" required>
 
           <label for="address-phone">Phone</label>
-          <input type="text" id="address-phone" maxlength="30" required>
+          <input type="text" id="address-phone" maxlength="20" required>
 
           <label for="address-line1">Address line 1</label>
-          <input type="text" id="address-line1" maxlength="255" required>
+          <input type="text" id="address-line1" maxlength="200" required>
 
           <label for="address-line2">Address line 2 (optional)</label>
-          <input type="text" id="address-line2" maxlength="255">
+          <input type="text" id="address-line2" maxlength="200">
 
           <label for="address-city">City</label>
           <input type="text" id="address-city" maxlength="100" required>
@@ -42,7 +43,7 @@
           <input type="text" id="address-state" maxlength="100" required>
 
           <label for="address-postal-code">Postal code</label>
-          <input type="text" id="address-postal-code" maxlength="20" required>
+          <input type="text" id="address-postal-code" maxlength="12" required>
 
           <label for="address-country">Country</label>
           <input type="text" id="address-country" maxlength="100" value="India" required>

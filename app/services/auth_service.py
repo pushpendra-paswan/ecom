@@ -10,6 +10,10 @@ from app.core.config import settings
 from app.repositories import user_repository
 from app.schemas.user import LoginRequest, RegisterRequest
 
+# A real bcrypt hash (same cost factor as real passwords, made once when the app starts). Login checks a
+# password against it when the email does not exist, so unknown and known emails take the same time.
+DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt())
+
 
 def register(db: Session, request: RegisterRequest):
     # Emails are stored in lowercase, so "A@x.com" and "a@x.com" are the same account
@@ -23,6 +27,10 @@ def register(db: Session, request: RegisterRequest):
     # bcrypt only reads 72 bytes, so reject longer passwords (some characters use several bytes)
     if len(request.password.encode()) > 72:
         raise HTTPException(status_code=422, detail="Password must be at most 72 bytes long")
+
+    # bcrypt stops reading at a NUL character, so everything after it would be ignored
+    if "\x00" in request.password:
+        raise HTTPException(status_code=422, detail="Password cannot contain a NUL character")
 
     # Hash the password with bcrypt (the plain password is never stored)
     password_hash = bcrypt.hashpw(request.password.encode(), bcrypt.gensalt()).decode()
@@ -49,16 +57,17 @@ def login(db: Session, request: LoginRequest):
     # One message for "unknown email" and "wrong password", so emails cannot be guessed
     invalid_message = "Incorrect email or password"
 
-    # bcrypt cannot handle more than 72 bytes, and no real password is that long
-    if len(password_bytes) > 72:
+    # bcrypt cannot handle more than 72 bytes, and no real password is that long (or has a NUL in it)
+    if len(password_bytes) > 72 or b"\x00" in password_bytes:
         raise HTTPException(status_code=401, detail=invalid_message)
 
     # Look the user up
     user = user_repository.get_user_by_email(db, email)
 
-    # Unknown email: still do a bcrypt hash so the response takes as long as a real login
+    # Unknown email: still do one bcrypt check (against the dummy hash) so the response
+    # takes as long as a real login
     if user is None:
-        bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+        bcrypt.checkpw(password_bytes, DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=401, detail=invalid_message)
 
     # Check the password first

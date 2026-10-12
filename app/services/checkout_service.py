@@ -11,6 +11,9 @@ from app.repositories import address_repository, cart_repository, order_reposito
 # How long the Stripe Checkout page stays open before the session expires
 CHECKOUT_SESSION_MINUTES = 30
 
+# The biggest order total in paise. Stripe accepts at most eight digits in the smallest currency unit.
+MAX_ORDER_TOTAL = 99_999_999
+
 
 def checkout(db: Session, current_user: User, address_id: int):
     # Before any database work: payments must be configured, and only with a Stripe TEST key
@@ -78,6 +81,14 @@ def checkout(db: Session, current_user: User, address_id: int):
             }
         )
         total_amount = total_amount + product.price * cart_item.quantity
+
+    # f2. A total that is too big for Stripe is refused. Nothing was written yet, so just let go of the locks.
+    if total_amount > MAX_ORDER_TOTAL:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Order total is too large (maximum ₹9,99,999.99 per order). Remove some items and try again.",
+        )
 
     # g. Create the order, with a copy of the shipping address
     order = order_repository.create_order(

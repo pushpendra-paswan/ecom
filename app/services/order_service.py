@@ -49,7 +49,7 @@ def get_order(db: Session, current_user: User, order_id: int):
 
     # Build the items with their line totals (the snapshot prices, never the current product prices)
     items = []
-    for order_item in sorted(order.items, key=lambda order_item: order_item.id):
+    for order_item in order.items:
         items.append(
             {
                 "product_id": order_item.product_id,
@@ -104,7 +104,7 @@ def list_seller_orders(db: Session, current_user: User, page: int, page_size: in
     for order in orders:
         items = []
         seller_subtotal = 0
-        for order_item in sorted(order.items, key=lambda order_item: order_item.id):
+        for order_item in order.items:
             if order_item.product.seller_id != current_user.id:
                 continue
             line_total = order_item.unit_price * order_item.quantity
@@ -142,7 +142,7 @@ def get_seller_order(db: Session, current_user: User, order_id: int):
     # Only this seller's own lines (the snapshot prices), never the other sellers' lines
     items = []
     seller_subtotal = 0
-    for order_item in sorted(order.items, key=lambda order_item: order_item.id):
+    for order_item in order.items:
         if order_item.product.seller_id != current_user.id:
             continue
         line_total = order_item.unit_price * order_item.quantity
@@ -218,7 +218,7 @@ def get_admin_order(db: Session, order_id: int):
     # Build the items with their line totals, and count the total quantity
     items = []
     item_count = 0
-    for order_item in sorted(order.items, key=lambda order_item: order_item.id):
+    for order_item in order.items:
         item_count = item_count + order_item.quantity
         items.append(
             {

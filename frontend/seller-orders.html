@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Orders</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-requires-login="true">
@@ -13,7 +14,7 @@
     <h1>Orders</h1>
 
     <!-- The orders and the page links (filled by seller-orders.js) -->
-    <div id="orders-area"><p class="state-loading">Loading...</p></div>
+    <div id="orders-area" aria-live="polite"><p class="state-loading">Loading...</p></div>
     <div id="pagination-area"></div>
   </main>
 

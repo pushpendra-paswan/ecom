@@ -211,7 +211,7 @@ async function loadProductsPage() {
   let minPrice = null;
   let maxPrice = null;
   let priceProblem = "";
-  const largestPaise = 2147483647;
+  const largestPaise = 1000000000;
   if (minPriceText !== "") {
     const minRupees = Number(minPriceText);
     if (!Number.isFinite(minRupees)) {
@@ -245,6 +245,7 @@ async function loadProductsPage() {
     filterMessageArea.textContent = "";
     const priceMessage = document.createElement("p");
     priceMessage.className = "error-message";
+    priceMessage.setAttribute("role", "alert");
     priceMessage.textContent = priceProblem;
     filterMessageArea.append(priceMessage);
     productsArea.textContent = "";
