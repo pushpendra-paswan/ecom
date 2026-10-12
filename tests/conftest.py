@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.db import get_db
 from app.main import app
+from app.models.catalog import Category, Product
 from app.models.user import User
 
 
@@ -132,3 +133,42 @@ def auth_headers(client):
         return {"Authorization": "Bearer " + token}
 
     return headers_for
+
+
+@pytest.fixture
+def create_category(test_engine):
+    # Returns a function that inserts a category straight into the test database
+    def create(name, slug=None):
+        if slug is None:
+            slug = name.lower().replace(" ", "-")
+        with Session(test_engine) as session:
+            category = Category(name=name, slug=slug)
+            session.add(category)
+            session.commit()
+            return category.id
+
+    return create
+
+
+@pytest.fixture
+def create_product(test_engine):
+    # Returns a function that inserts a product straight into the test database
+    def create(seller_id, category_id, name="Test product", price=10000, stock=10, is_active=True, created_at=None):
+        with Session(test_engine) as session:
+            product = Product(
+                seller_id=seller_id,
+                category_id=category_id,
+                name=name,
+                description="A test product",
+                price=price,
+                stock=stock,
+                is_active=is_active,
+            )
+            # Tests that check the order of products set created_at themselves
+            if created_at is not None:
+                product.created_at = created_at
+            session.add(product)
+            session.commit()
+            return product.id
+
+    return create

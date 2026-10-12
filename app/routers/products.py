@@ -1,0 +1,70 @@
+from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy.orm import Session
+
+from app.core.dependencies import get_current_user, require_seller
+from app.db import get_db
+from app.models.user import User
+from app.schemas.product import (
+    CreateProductRequest,
+    ProductListResponse,
+    ProductResponse,
+    UpdateProductRequest,
+)
+from app.services import product_service
+
+# No prefix here, because this file has both /products and /seller/products
+router = APIRouter(tags=["products"])
+
+
+@router.get("/seller/products", response_model=ProductListResponse)
+def list_my_products(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    seller: User = Depends(require_seller),
+    db: Session = Depends(get_db),
+):
+    return product_service.list_seller_products(db, seller, page, page_size)
+
+
+@router.get("/products", response_model=ProductListResponse)
+def list_products(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    category: str | None = None,
+    db: Session = Depends(get_db),
+):
+    return product_service.list_public_products(db, page, page_size, category)
+
+
+@router.get("/products/{product_id}", response_model=ProductResponse)
+def read_product(product_id: int, db: Session = Depends(get_db)):
+    return product_service.get_public_product(db, product_id)
+
+
+@router.post("/products", response_model=ProductResponse, status_code=201)
+def create_product(
+    request: CreateProductRequest,
+    seller: User = Depends(require_seller),
+    db: Session = Depends(get_db),
+):
+    return product_service.create_product(db, seller, request)
+
+
+@router.patch("/products/{product_id}", response_model=ProductResponse)
+def update_product(
+    product_id: int,
+    request: UpdateProductRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return product_service.update_product(db, current_user, product_id, request)
+
+
+@router.delete("/products/{product_id}", status_code=204)
+def delete_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    product_service.deactivate_product(db, current_user, product_id)
+    return Response(status_code=204)

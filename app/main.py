@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers import admin, auth, users
+from app.routers import admin, auth, categories, products, users
 
 app = FastAPI(title="Ecommerce")
 
@@ -12,6 +12,8 @@ app = FastAPI(title="Ecommerce")
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(admin.router)
+app.include_router(categories.router)
+app.include_router(products.router)
 
 
 @app.get("/health")

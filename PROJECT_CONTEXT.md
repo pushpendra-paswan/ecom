@@ -27,10 +27,10 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── db.py              # engine, SessionLocal, Base, get_db
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
-│   ├── schemas/           # user.py, address.py
-│   ├── routers/           # auth.py, users.py, admin.py
-│   ├── services/          # auth_service.py, user_service.py, address_service.py
-│   ├── repositories/      # user_repository.py, address_repository.py
+│   ├── schemas/           # user.py, address.py, category.py, product.py
+│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py
+│   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
@@ -38,7 +38,7 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (api.js, login.js, register.js, index.js), images/
 ├── frontend/              # index.html (temporary user bar), login.html, register.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -74,19 +74,22 @@ Two fixtures:
 - `db_session`: a session inside an outer transaction that is rolled back after every test (savepoint mode, so a failed statement inside `pytest.raises(IntegrityError)` does not break the test). Use this for model and repository/service tests.
 - `client`: a `TestClient` whose `get_db` is overridden to use the test database. It commits for real, so after every test it runs `TRUNCATE users, categories RESTART IDENTITY CASCADE` (this empties every table). The test database is never seeded.
 
-Two helper fixtures (M2) in `conftest.py`:
+Helper fixtures in `conftest.py` (M2, M3):
 - `create_user(email, role="customer", is_active=True, password="Password@123")`: inserts a user directly into the test database (fast bcrypt rounds) and returns the user id.
 - `auth_headers(email, password="Password@123")`: logs in through `/auth/login` and returns `{"Authorization": "Bearer ..."}`.
+- `create_category(name, slug=None)` (M3): inserts a category directly and returns its id. The slug defaults to the lowercased name with spaces turned into hyphens.
+- `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None)` (M3): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
 ## Completed milestones
 
 - **M0: Project setup.** Docker Compose (app + Postgres 16 with healthcheck and named volume), FastAPI skeleton with `/health`, static and frontend mounts, Alembic configured (no migrations), pytest against a separate test database.
 - **M1: Database schema, models and seed data.** All 9 tables as SQLAlchemy 2.x models, one Alembic migration (`6fc51572ed70`), seed script, schema tests. No endpoints.
 - **M2: Authentication, roles and user accounts.** Register, login (JWT), profile, addresses, admin user list, role dependencies, login/register pages, shared `api.js`, 32 tests passing. No schema change (no new migration).
+- **M3: Catalog API.** Public category and product reads, admin category management, seller/admin product management with soft delete, `/seller/products`. No schema change (no new migration). 56 tests passing.
 
 ## Pending milestones
 
-M3 Catalog API · M4 Storefront frontend · M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M4 Storefront frontend · M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -112,7 +115,7 @@ Created by the single migration `alembic/versions/6fc51572ed70_create_initial_sc
 
 Constraints are named explicitly (`ck_<table>_<rule>`, `uq_cart_items_cart_id_product_id`); unique and FK constraints use Postgres default names.
 
-ORM relationships (only these four): `Product.category`, `Cart.items`, `Order.items`, `Order.payment`. Everything else is queried by id in repositories.
+ORM relationships (only these five): `Product.category`, `Product.seller` (added in M3, no schema change), `Cart.items`, `Order.items`, `Order.payment`. Everything else is queried by id in repositories.
 
 ## Seed data
 
@@ -171,7 +174,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M2)
+## API endpoints (as of M3)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -185,6 +188,16 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | PUT `/users/me/addresses/{address_id}` | any logged-in user | Full replace. Not your address: 404 |
 | DELETE `/users/me/addresses/{address_id}` | any logged-in user | Returns 204. Not your address: 404 |
 | GET `/admin/users` | admin only | Paginated (see below) |
+| GET `/categories` | public | All categories sorted by name, with `product_count` |
+| POST `/categories` | admin only | Returns 201. Duplicate name or slug: 409. Name with no letters or digits: 422 |
+| PUT `/categories/{category_id}` | admin only | Same body and rules as create. Missing: 404 |
+| DELETE `/categories/{category_id}` | admin only | Returns 204. Any product (active or not) uses it: 409 `"Category has products"`. Missing: 404 |
+| GET `/products` | public | Paginated, active products only, newest first. Query: `page`, `page_size`, `category` (slug) |
+| GET `/products/{product_id}` | public | Missing or inactive: 404 |
+| POST `/products` | seller only | Returns 201. Admin and customer get 403. Unknown `category_id`: 400 |
+| PATCH `/products/{product_id}` | seller (own products) or admin (any) | Partial update. Customer: 403. Other seller's product or missing: 404 |
+| DELETE `/products/{product_id}` | seller (own products) or admin (any) | Soft delete, returns 204 (also when already inactive). Same rules as PATCH |
+| GET `/seller/products` | seller only | Paginated, the caller's own products, active or not, newest first |
 
 The pages `/`, `/login.html` and `/register.html` and everything under `/static` are public files.
 
@@ -231,7 +244,60 @@ The algorithm (HS256) is written inline where the token is created and decoded. 
 - `static/js/index.js` was added for the temporary home page bar (the milestone listed only login.js and register.js). Both it and the bar in `index.html` go away in M4 when the real navbar arrives.
 - `static/js/.gitkeep` was deleted because the folder now has files.
 
-## Notes for the next milestone (M3)
+## Catalog (M3)
+
+**Category response** (create, update): `{id, name, slug, description}`. **List item** (`GET /categories`) adds `product_count`, the number of ACTIVE products (0 for empty categories). It is one grouped query with an outer join; the "is active" test is inside the join condition, so empty categories are not dropped.
+
+**Product response** (list items, detail, create, update and `/seller/products` all use this shape):
+
+```json
+{"id": 1, "name": "...", "description": "...", "price": 49900, "stock": 5,
+ "image_url": "https://... or /static/images/x.png or null", "is_active": true,
+ "created_at": "2026-...Z", "category": {"id": 2, "name": "Books", "slug": "books"},
+ "seller": {"id": 3, "full_name": "Meera Iyer"}}
+```
+
+The seller's email and every other private field are never returned. Lists are wrapped in the pagination format above. The schemas are in `app/schemas/product.py` and `app/schemas/category.py`.
+
+**Rules**
+- **Soft delete:** `DELETE /products/{id}` only sets `is_active = false`. The row stays, so old orders and carts that point to the product stay valid. `PATCH {"is_active": true}` brings it back. Inactive products are hidden from `GET /products` and `GET /products/{id}` (404) but still appear in `/seller/products`.
+- **Other sellers' products return 404** (not 403) on PATCH and DELETE. A customer gets 403. A product that does not exist gets 404. Admins can change any product. `seller_id` is set from the logged-in seller on create and can never be changed.
+- **Slug rule** (written inline in `category_service.py`, once in create and once in update): lowercase; spaces and underscores become hyphens; every character outside `a-z`, `0-9` and `-` is removed; repeated hyphens collapse into one; hyphens at the start and end are trimmed. "Home & Kitchen" becomes `home-kitchen`. An empty result (for example "!!!") gives 422. Updating a category regenerates the slug.
+- **Duplicates:** the service inserts and catches `IntegrityError` (rollback, then 409), so the unique constraints on `name` and `slug` decide. Names that differ only in punctuation or case (for example "Books" and "books!") share a slug and give 409.
+- **Money** is integer paise everywhere in the API. Nothing is converted.
+- `image_url` must start with `http://`, `https://` or `/static/images/` (checked by a `Field(pattern=...)`) and is at most 500 characters. `null` is allowed and PATCH with `image_url: null` removes the image.
+
+## Notes for M4 (storefront frontend)
+
+- Response shapes are described above (`app/schemas/product.py`, `app/schemas/category.py`). Both lists are public, so the storefront needs no token.
+- **Prices are paise.** The frontend must divide by 100 to show rupees (for example `49900` is Rs 499.00).
+- `GET /categories` returns `product_count` (active products only), ready for a home page category grid.
+- `image_url` is either an `https://` URL, a `/static/images/...` path (served by the static mount), or `null`. Show a placeholder for `null`.
+- `stock` can be 0: show "out of stock" and do not offer add-to-cart.
+- `GET /products?category=<slug>` filters by category and gives 404 for an unknown slug.
+
+## Notes for M5 (search, filter, sort)
+
+- `GET /products` already has: `page`, `page_size`, `category` (slug). Sorting is fixed to newest first (`created_at DESC, id DESC`).
+- Still missing: text search (and the search index), `min_price` / `max_price`, and sort options. Add them to the same endpoint, `product_service.list_public_products`, and the matching `product_repository.list_products` / `count_products` (both take the same filters, so keep them in step).
+- `/seller/products` uses the same repository functions (with `only_active=False` and `seller_id`), so new filters added there are optional for it.
+
+## Notes for M6 (cart)
+
+- A cart can contain products that are deactivated later (soft delete keeps the row). The cart must handle inactive products: show them as unavailable and refuse them at checkout. `product_repository.get_product_by_id` returns inactive products too; check `is_active` yourself. Adding a product to the cart should reject missing and inactive products.
+
+## Key design decisions (M3)
+
+- **`PATCH` body:** the optional fields use `Field(default=None)` with a non-null type, so a field that is left out is simply not used, while an explicit `null` gives 422 (only `image_url` accepts `null`). The service reads `request.model_dump(exclude_unset=True)`.
+- **One product list query:** `product_repository.list_products` and `count_products` take `only_active`, `category_id` and `seller_id`, so the public list and `/seller/products` share them. The service passes `None` for the filters it does not use.
+- **`/seller/products`** is declared first in `routers/products.py` (router without a prefix). It is a different path from `/products/{product_id}`, so they can never clash.
+- **Role check for PATCH/DELETE** is in the service (`get_current_user`, then 403 unless seller or admin, then the 404 ownership check), as asked. POST and `/seller/products` use `require_seller`, so an admin gets 403 there.
+- **Product responses after a write:** `create_product` reads the product again with `joinedload` so the category and seller are in the response; `update_product` assigns `product.category` when the category changes (the session does not expire objects on commit).
+- **Categories:** create and update responses have no `product_count` (only the list does). Deleting also catches `IntegrityError` (rollback, then 409) in case a product was added at the same moment.
+- **Eager loading:** `Product.category` and `Product.seller` are loaded with `joinedload` in the repository queries, so lists do not run one query per product.
+- **Slug limits:** only ASCII letters and digits are kept, so a name made only of other scripts (for example Hindi) gives 422.
+
+## Patterns and test tips (handoff notes from M2, still valid)
 
 - **Seller endpoints must allow a seller or an admin.** `require_seller` accepts only sellers, so do NOT use it for product management. Use `get_current_user` and check `role in ("seller", "admin")` inline in the service (raise 403 otherwise).
 - **Ownership:** a seller may only change their own products (`product.seller_id == current_user.id`); an admin may change any. When a seller touches someone else's product, return 404 (not 403), like addresses.

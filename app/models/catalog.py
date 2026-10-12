@@ -15,6 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.models.user import User
 
 
 class Category(Base):
@@ -57,3 +58,4 @@ class Product(Base):
     )
 
     category: Mapped[Category] = relationship()
+    seller: Mapped[User] = relationship()
