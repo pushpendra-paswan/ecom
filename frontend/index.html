@@ -3,17 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ecommerce</title>
+  <title>Home</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <!-- Temporary stand-in for the real navbar (M4) -->
-  <div id="user-bar" class="user-bar">Loading...</div>
+  <header id="site-header"></header>
 
-  <h1>Ecommerce</h1>
-  <p>The store is coming soon.</p>
+  <main class="container">
+    <!-- Welcome banner -->
+    <section class="banner">
+      <h1>Welcome to our store</h1>
+      <p>Find great products across every category.</p>
+      <a class="button" href="/products.html">Shop all products</a>
+    </section>
+
+    <!-- Category cards (filled by home.js) -->
+    <section>
+      <h2>Shop by category</h2>
+      <div id="categories-area"><p class="state-loading">Loading...</p></div>
+    </section>
+
+    <!-- The 8 newest products (filled by home.js) -->
+    <section>
+      <div class="section-header">
+        <h2>Latest products</h2>
+        <a href="/products.html">View all</a>
+      </div>
+      <div id="products-area"><p class="state-loading">Loading...</p></div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
 
   <script src="/static/js/api.js"></script>
-  <script src="/static/js/index.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/product-card.js"></script>
+  <script src="/static/js/home.js"></script>
 </body>
 </html>

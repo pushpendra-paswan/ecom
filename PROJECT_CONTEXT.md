@@ -36,9 +36,9 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
 ├── alembic/               # env.py, script.py.mako, versions/ (one migration: initial schema)
 ├── alembic.ini
-├── static/                # css/style.css, js/ (api.js, login.js, register.js, index.js), images/
-├── frontend/              # index.html (temporary user bar), login.html, register.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py
+├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
+├── frontend/              # index.html, products.html, product.html, login.html, register.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -54,7 +54,7 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 docker compose up --build
 ```
 
-- App: http://localhost:8000/ (home page with a temporary Login / Register / Logout bar)
+- App: http://localhost:8000/ (storefront home page)
 - Swagger: http://localhost:8000/docs
 - Health: http://localhost:8000/health
 - CSS: http://localhost:8000/static/css/style.css
@@ -86,10 +86,11 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M1: Database schema, models and seed data.** All 9 tables as SQLAlchemy 2.x models, one Alembic migration (`6fc51572ed70`), seed script, schema tests. No endpoints.
 - **M2: Authentication, roles and user accounts.** Register, login (JWT), profile, addresses, admin user list, role dependencies, login/register pages, shared `api.js`, 32 tests passing. No schema change (no new migration).
 - **M3: Catalog API.** Public category and product reads, admin category management, seller/admin product management with soft delete, `/seller/products`. No schema change (no new migration). 56 tests passing.
+- **M4: Storefront frontend.** Shared navbar and footer (`layout.js`), home page, product listing page, product detail page, one product card function, one stylesheet, placeholder image. Read-only: no search, no cart. No backend or schema change. 57 tests passing (one new test that checks the frontend files are served).
 
 ## Pending milestones
 
-M4 Storefront frontend · M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M5 Search, filter, sort, pagination · M6 Cart · M7 Checkout and orders · M8 Stripe webhooks · M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
 
 ## Database schema
 
@@ -199,14 +200,14 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | DELETE `/products/{product_id}` | seller (own products) or admin (any) | Soft delete, returns 204 (also when already inactive). Same rules as PATCH |
 | GET `/seller/products` | seller only | Paginated, the caller's own products, active or not, newest first |
 
-The pages `/`, `/login.html` and `/register.html` and everything under `/static` are public files.
+The pages `/`, `/products.html`, `/product.html`, `/login.html` and `/register.html` and everything under `/static` are public files.
 
 ## Auth flow (M2)
 
 - **Register** creates a `customer` or `seller` (never `admin`; the seed creates admins). Email is trimmed and lowercased, password is 8 to 72 characters (also max 72 bytes), stored only as a bcrypt hash. Duplicate email: 409.
 - **Login** looks up the lowercased email, checks the bcrypt password first, then `is_active`. Unknown email and wrong password give the same 401 `"Incorrect email or password"` (an unknown email still runs one bcrypt hash so timing is similar). A correct password on a disabled account gives 403 `"Account is disabled"`.
 - **Token:** PyJWT, HS256, signed with `JWT_SECRET`. Payload is only `sub` (user id as a string) and `exp` (`JWT_EXPIRE_MINUTES`, default 60). The role is NOT in the token.
-- **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and goes to `/login.html`.
+- **Browser storage:** the token is in `localStorage` under the key `access_token`. `static/js/api.js` (`apiRequest(path, method, body)`) adds `Authorization: Bearer <token>`. On a 401 from any path except `/auth/login` it removes the token and throws; it goes to `/login.html` only when the page's `<body>` has `data-requires-login="true"` (changed in M4).
 - **Every request** to a protected endpoint goes through `get_current_user` (in `app/core/dependencies.py`): it reads the Bearer header (`HTTPBearer(auto_error=False)`), decodes the token, loads the user from the database and returns the user. The role and `is_active` always come from the database.
 - **401** (`"Not authenticated"`, with `WWW-Authenticate: Bearer`): missing header, bad signature, expired token, no `sub`/`exp`, user not found, or user disabled.
 - **403:** logged in, but the role is wrong. `require_customer`, `require_seller` and `require_admin` check that the role is exactly that role (an admin does NOT pass `require_customer` or `require_seller`).
@@ -241,7 +242,7 @@ The algorithm (HS256) is written inline where the token is created and decoded. 
 - **Unknown JSON fields are ignored** (for example `role` in a PATCH body), so PATCH `/users/me` can only change `full_name`.
 - **An empty `JWT_SECRET` stops the app at startup** (a check at the bottom of `config.py`), because an empty key would allow forged tokens.
 - **`apiRequest`:** the method defaults to `GET` if omitted, and a `204` response returns `null`.
-- `static/js/index.js` was added for the temporary home page bar (the milestone listed only login.js and register.js). Both it and the bar in `index.html` go away in M4 when the real navbar arrives.
+- `static/js/index.js` (temporary user bar) was added in M2 and deleted in M4 when the real navbar arrived.
 - `static/js/.gitkeep` was deleted because the folder now has files.
 
 ## Catalog (M3)
@@ -267,7 +268,58 @@ The seller's email and every other private field are never returned. Lists are w
 - **Money** is integer paise everywhere in the API. Nothing is converted.
 - `image_url` must start with `http://`, `https://` or `/static/images/` (checked by a `Field(pattern=...)`) and is at most 500 characters. `null` is allowed and PATCH with `image_url: null` removes the image.
 
-## Notes for M4 (storefront frontend)
+## Frontend (M4)
+
+### Frontend map
+
+| URL | Query parameters | Files |
+|---|---|---|
+| `/` | none | `frontend/index.html`, `home.js` |
+| `/products.html` | `category` (a category slug), `page` (default 1; anything below 1 or not a number becomes 1) | `frontend/products.html`, `products.js` |
+| `/product.html` | `id` (positive whole number; anything else shows "Product not found" without calling the API) | `frontend/product.html`, `product.js` |
+| `/login.html` | none | `frontend/login.html`, `login.js` |
+| `/register.html` | none | `frontend/register.html`, `register.js` |
+
+| Script (`static/js/`) | What it does |
+|---|---|
+| `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
+| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads |
+| `product-card.js` | `buildProductCard(product)`: returns the `<a>` card used by the home and listing pages (image with one-time placeholder fallback, name, price, "Out of stock" label) |
+| `home.js` | Category cards (`GET /categories`) and the 8 newest products (`GET /products?page=1&page_size=8`) |
+| `products.js` | Category link row, heading, total count, product grid (20 per page) and Previous/Next links |
+| `product.js` | Product detail (image, name, category link, seller, price, stock status, description) |
+| `login.js`, `register.js` | The two forms (from M2) |
+
+`static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
+
+### How to add a new page
+
+1. Create `frontend/<name>.html` with `<!DOCTYPE html>`, `lang="en"`, charset and viewport meta tags, a meaningful `<title>` and the stylesheet link.
+2. Inside `<body>`: an empty `<header id="site-header"></header>`, a `<main class="container">` with the content, and an empty `<footer id="site-footer"></footer>`.
+3. Scripts at the end of the body, in this order: `api.js`, `layout.js`, then the page script (add `product-card.js` before the page script if it shows product cards).
+4. If the page needs a logged-in user (cart, checkout, orders), put `data-requires-login="true"` on `<body>`. Then a 401 sends the user to `/login.html`. Public pages must NOT set it, so a stale token never redirects them.
+5. Script globals are shared between script tags, so page scripts put their code inside one function (for example `async function loadProductsPage()`) and call it once. Do not redeclare `SITE_NAME`, `apiRequest`, `buildProductCard` or `showLayout`.
+
+### Frontend rules
+
+- **Price display** (prices are paise, shown as rupees). Use this exact inline expression wherever a price is shown (`price` is the paise value, for example `product.price`):
+  `"₹" + (price / 100).toLocaleString("en-IN", { minimumFractionDigits: price % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })`
+- **Never put API data into the page with `innerHTML` or template strings that become HTML.** Names, descriptions, category names and seller names come from sellers and admins. Build elements with `document.createElement`, set text with `textContent`, set attributes with `setAttribute` or properties, and use `encodeURIComponent` for text values in links. The description uses `textContent` in an element with `white-space: pre-line`.
+- Every data area starts with "Loading..." and shows a message plus a "Try again" button (reloads the page) when a request fails. Empty lists show "No products found." with a link to all products.
+- Stock status: 0 is red "Out of stock", 1 to 5 is orange "Only N left in stock", above 5 is green "In stock".
+
+### Key design decisions (M4)
+
+- `apiRequest` now puts the HTTP status on the error (`error.status`). The milestone did not ask for it; `product.js` needs it to tell a 404 ("Product not found") from other failures (which get an error message and "Try again").
+- The product id must also be at most 2147483647 (the database integer limit). A larger number would make the API answer 500 (an existing backend quirk), so the page shows "Product not found" without calling the API.
+- `page` is accepted only if it is a safe integer of at least 1, so a huge page number falls back to 1 instead of overflowing the database offset.
+- A page number past the last page shows "No products found." and no pagination.
+- Page titles do not contain the site name (it is defined only in `layout.js`). `product.js` sets the tab title to the product name.
+- Page scripts wrap their code in one function each (classic scripts have no top-level `await`, and it keeps their variables out of the global scope). Error boxes and empty states are written out in each script, as the coding style asks, not shared.
+- `login.html` and `register.html` now have the navbar and footer, with the form inside `<main class="container">`. `static/js/index.js` and the `.user-bar` style were removed.
+- Tested by hand in headless Chrome (all pages, stale token, valid token, database stopped, 375px wide). The only automated frontend test checks that the files are served.
+
+## Notes from M3 for the storefront (used in M4)
 
 - Response shapes are described above (`app/schemas/product.py`, `app/schemas/category.py`). Both lists are public, so the storefront needs no token.
 - **Prices are paise.** The frontend must divide by 100 to show rupees (for example `49900` is Rs 499.00).
@@ -278,12 +330,14 @@ The seller's email and every other private field are never returned. Lists are w
 
 ## Notes for M5 (search, filter, sort)
 
+- **Frontend:** `products.html` and `products.js` are where search, filters and sorting go (read the new query parameters next to `category` and `page`, and keep them in the Previous/Next links). The navbar search box is added in `layout.js`. The category links row already exists in `products.js`.
 - `GET /products` already has: `page`, `page_size`, `category` (slug). Sorting is fixed to newest first (`created_at DESC, id DESC`).
 - Still missing: text search (and the search index), `min_price` / `max_price`, and sort options. Add them to the same endpoint, `product_service.list_public_products`, and the matching `product_repository.list_products` / `count_products` (both take the same filters, so keep them in step).
 - `/seller/products` uses the same repository functions (with `only_active=False` and `seller_id`), so new filters added there are optional for it.
 
 ## Notes for M6 (cart)
 
+- **Frontend:** the cart link and the cart count badge go in `layout.js` (inside the navbar). The Add to Cart control goes in `product.html` and `product.js` (hide or disable it when `stock` is 0). The cart pages (and checkout and orders later) must set `data-requires-login="true"` on `<body>`.
 - A cart can contain products that are deactivated later (soft delete keeps the row). The cart must handle inactive products: show them as unavailable and refuse them at checkout. `product_repository.get_product_by_id` returns inactive products too; check `is_active` yourself. Adding a product to the cart should reject missing and inactive products.
 
 ## Key design decisions (M3)

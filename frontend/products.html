@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>All products</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <!-- Row of category links (filled by products.js) -->
+    <div id="category-links-area"><p class="state-loading">Loading...</p></div>
+
+    <!-- Heading and total count (filled by products.js) -->
+    <h1 id="page-heading"></h1>
+    <p id="product-count" class="product-count"></p>
+
+    <!-- Product cards (filled by products.js) -->
+    <div id="products-area"><p class="state-loading">Loading...</p></div>
+
+    <!-- Previous / Next (filled by products.js) -->
+    <div id="pagination-area"></div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/product-card.js"></script>
+  <script src="/static/js/products.js"></script>
+</body>
+</html>

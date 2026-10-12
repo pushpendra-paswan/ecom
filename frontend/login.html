@@ -3,26 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Log in - Ecommerce</title>
+  <title>Log in</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <div class="form-card">
-    <h1>Log in</h1>
-    <form id="login-form">
-      <label for="email">Email</label>
-      <input type="email" id="email" required>
+  <header id="site-header"></header>
 
-      <label for="password">Password</label>
-      <input type="password" id="password" required>
+  <main class="container">
+    <div class="form-card">
+      <h1>Log in</h1>
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input type="email" id="email" required>
 
-      <p id="error-message" class="error-message" hidden></p>
-      <button type="submit" id="submit-button">Log in</button>
-    </form>
-    <p>New here? <a href="/register.html">Create an account</a></p>
-  </div>
+        <label for="password">Password</label>
+        <input type="password" id="password" required>
+
+        <p id="error-message" class="error-message" hidden></p>
+        <button type="submit" id="submit-button">Log in</button>
+      </form>
+      <p>New here? <a href="/register.html">Create an account</a></p>
+    </div>
+  </main>
+
+  <footer id="site-footer"></footer>
 
   <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
   <script src="/static/js/login.js"></script>
 </body>
 </html>
