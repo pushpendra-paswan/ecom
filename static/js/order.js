@@ -14,6 +14,7 @@ async function loadOrderPage() {
     pending: "Pending",
     succeeded: "Paid",
     failed: "Failed",
+    refunded: "Refunded",
   };
 
   // The id must be a positive whole number that fits the database integer column.
@@ -136,16 +137,103 @@ async function loadOrderPage() {
   const paymentLine = document.createElement("div");
   paymentLine.className = "order-detail-payment";
   if (order.payment !== null) {
-    paymentLine.textContent = "Payment: " + (paymentLabels[order.payment.status] || order.payment.status);
+    // The payment status is a badge, so a refund is easy to see
+    paymentLine.textContent = "Payment: ";
+    const paymentBadge = document.createElement("span");
+    paymentBadge.className = "badge badge-payment-" + order.payment.status;
+    paymentBadge.textContent = paymentLabels[order.payment.status] || order.payment.status;
+    paymentLine.append(paymentBadge);
   } else {
     paymentLine.textContent = "Payment: not available";
+  }
+
+  // The cancel area: a message place and the buttons that apply to this order
+  const actionArea = document.createElement("div");
+  actionArea.className = "order-actions";
+  const actionMessage = document.createElement("p");
+  actionMessage.className = "error-message";
+  actionMessage.hidden = true;
+  actionArea.append(actionMessage);
+
+  // "Cancel order" for an order that is waiting for payment or paid (it asks first)
+  if (order.status === "pending_payment" || order.status === "paid") {
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel order";
+    cancelButton.addEventListener("click", async function () {
+      let question = "Cancel this order?";
+      if (order.status === "paid") {
+        question = "Cancel this order? Your payment will be refunded.";
+      }
+      if (!confirm(question)) {
+        return;
+      }
+      cancelButton.disabled = true;
+      actionMessage.hidden = true;
+      try {
+        await apiRequest("/orders/" + order.id + "/cancel", "POST");
+        window.location.reload();
+      } catch (error) {
+        // Show the API message and do not reload
+        actionMessage.textContent = error.message;
+        actionMessage.hidden = false;
+        if (error.status === 502) {
+          // The order is cancelled but the refund is not done: the page needs a reload to show that
+          const reloadButton = document.createElement("button");
+          reloadButton.type = "button";
+          reloadButton.textContent = "Reload";
+          reloadButton.addEventListener("click", function () {
+            window.location.reload();
+          });
+          cancelButton.hidden = true;
+          actionArea.append(reloadButton);
+        } else {
+          cancelButton.disabled = false;
+        }
+      }
+    });
+    actionArea.append(cancelButton);
+  }
+
+  // A cancelled order whose money has not been given back yet: "Retry refund" calls the same endpoint
+  if (order.status === "cancelled" && order.payment !== null && order.payment.status === "succeeded") {
+    const refundPending = document.createElement("p");
+    refundPending.className = "order-detail-payment";
+    refundPending.textContent = "Refund pending";
+    const retryRefundButton = document.createElement("button");
+    retryRefundButton.type = "button";
+    retryRefundButton.textContent = "Retry refund";
+    retryRefundButton.addEventListener("click", async function () {
+      retryRefundButton.disabled = true;
+      actionMessage.hidden = true;
+      try {
+        await apiRequest("/orders/" + order.id + "/cancel", "POST");
+        window.location.reload();
+      } catch (error) {
+        // Show the API message and do not reload
+        actionMessage.textContent = error.message;
+        actionMessage.hidden = false;
+        if (error.status === 502) {
+          const reloadButton = document.createElement("button");
+          reloadButton.type = "button";
+          reloadButton.textContent = "Reload";
+          reloadButton.addEventListener("click", function () {
+            window.location.reload();
+          });
+          actionArea.append(reloadButton);
+        } else {
+          retryRefundButton.disabled = false;
+        }
+      }
+    });
+    actionArea.append(refundPending, retryRefundButton);
   }
 
   const ordersLink = document.createElement("a");
   ordersLink.href = "/orders.html";
   ordersLink.textContent = "Back to My Orders";
 
-  orderArea.append(heading, headerRow, addressSection, itemsSection, totalLine, paymentLine, ordersLink);
+  orderArea.append(heading, headerRow, addressSection, itemsSection, totalLine, paymentLine, actionArea, ordersLink);
 }
 
 loadOrderPage();

@@ -76,11 +76,16 @@ class OrderItem(Base):
     unit_price: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # The product of this line (the seller dashboard reads its seller from here)
+    product: Mapped["Product"] = relationship()
+
 
 class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
-        CheckConstraint("status IN ('pending', 'succeeded', 'failed')", name="ck_payments_status"),
+        CheckConstraint(
+            "status IN ('pending', 'succeeded', 'failed', 'refunded')", name="ck_payments_status"
+        ),
         CheckConstraint("amount >= 0", name="ck_payments_amount_not_negative"),
     )
 
@@ -91,6 +96,8 @@ class Payment(Base):
         String(255), unique=True, nullable=True
     )
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Set when a refund was made (empty if Stripe said the charge was already refunded)
+    stripe_refund_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), nullable=False, server_default="inr")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +69,69 @@ class OrderDetailResponse(BaseModel):
     status: str
     total_amount: int
     created_at: datetime
+    shipping_address: ShippingAddressResponse
+    items: list[OrderDetailItemResponse]
+    payment: OrderPaymentResponse | None
+
+
+class CancelOrderResponse(BaseModel):
+    order_id: int
+    status: str
+    payment_status: str
+
+
+class UpdateOrderStatusRequest(BaseModel):
+    # Only these two values are accepted. paid, cancelled, pending_payment and anything else give 422.
+    status: Literal["shipped", "delivered"]
+
+
+class UpdateOrderStatusResponse(BaseModel):
+    order_id: int
+    status: str
+
+
+class SellerOrderEntryResponse(BaseModel):
+    # Only this seller's own lines. No customer email, no Stripe ids.
+    id: int
+    status: str
+    created_at: datetime
+    items: list[OrderDetailItemResponse]
+    seller_subtotal: int
+    has_other_sellers: bool
+
+
+class SellerOrderListResponse(BaseModel):
+    items: list[SellerOrderEntryResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class SellerOrderDetailResponse(SellerOrderEntryResponse):
+    # The seller needs the address to ship
+    shipping_address: ShippingAddressResponse
+
+
+class AdminOrderEntryResponse(BaseModel):
+    id: int
+    status: str
+    created_at: datetime
+    total_amount: int
+    customer_email: str
+    shipping_full_name: str
+    item_count: int
+
+
+class AdminOrderListResponse(BaseModel):
+    items: list[AdminOrderEntryResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminOrderDetailResponse(AdminOrderEntryResponse):
+    # No Stripe ids here, on purpose
+    user_id: int
     shipping_address: ShippingAddressResponse
     items: list[OrderDetailItemResponse]
     payment: OrderPaymentResponse | None

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_seller
@@ -26,6 +26,15 @@ def list_my_products(
     db: Session = Depends(get_db),
 ):
     return product_service.list_seller_products(db, seller, page, page_size)
+
+
+@router.get("/seller/products/{product_id}", response_model=ProductResponse)
+def read_my_product(
+    product_id: int = Path(ge=1, le=2147483647),
+    seller: User = Depends(require_seller),
+    db: Session = Depends(get_db),
+):
+    return product_service.get_seller_product(db, seller, product_id)
 
 
 @router.get("/products", response_model=ProductListResponse)

@@ -28,17 +28,17 @@ ecom/                      # project root (CLAUDE.md calls it ecommerce/)
 │   ├── seed.py            # demo data: python -m app.seed
 │   ├── models/            # user.py, catalog.py, cart.py, order.py (__init__ imports all)
 │   ├── schemas/           # user.py, address.py, category.py, product.py, cart.py, order.py
-│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py, orders.py, webhooks.py
-│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py, webhook_service.py
+│   ├── routers/           # auth.py, users.py, admin.py, categories.py, products.py, cart.py, orders.py, seller_orders.py, webhooks.py
+│   ├── services/          # auth_service.py, user_service.py, address_service.py, category_service.py, product_service.py, cart_service.py, checkout_service.py, order_service.py, order_lifecycle_service.py, webhook_service.py
 │   ├── repositories/      # user_repository.py, address_repository.py, category_repository.py, product_repository.py, cart_repository.py, order_repository.py
 │   └── core/
 │       ├── config.py      # Settings class (reads env variables)
 │       └── dependencies.py  # get_current_user, require_customer, require_seller, require_admin
-├── alembic/               # env.py, script.py.mako, versions/ (two migrations: initial schema, M5 search)
+├── alembic/               # env.py, script.py.mako, versions/ (three migrations: initial schema, M5 search, M9 refunded status)
 ├── alembic.ini
 ├── static/                # css/style.css, js/ (see the frontend map), images/ (placeholder.svg)
-├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html
-├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_webhooks.py, test_webhooks_concurrency.py, test_frontend_files.py
+├── frontend/              # index.html, products.html, product.html, cart.html, login.html, register.html, addresses.html, checkout.html, order-success.html, order-cancelled.html, orders.html, order.html, seller-products.html, seller-product-form.html, seller-orders.html, seller-order.html, admin-orders.html, admin-order.html, admin-users.html
+├── tests/                 # conftest.py, test_health.py, test_schema.py, test_auth.py, test_users.py, test_roles.py, test_categories.py, test_products_public.py, test_products_write.py, test_search.py, test_cart.py, test_checkout.py, test_checkout_concurrency.py, test_webhooks.py, test_webhooks_concurrency.py, test_order_cancel.py, test_order_status.py, test_order_lifecycle_concurrency.py, test_frontend_files.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pytest.ini
@@ -80,6 +80,7 @@ Helper fixtures in `conftest.py` (M2, M3):
 - `create_category(name, slug=None)` (M3): inserts a category directly and returns its id. The slug defaults to the lowercased name with spaces turned into hyphens.
 - `committed_data` (M7, used only by `tests/test_checkout_concurrency.py`): methods `customer(email)` (a customer with one address, returns `(user_id, address_id)`), `products(count, stock, price=10000)` (a seller, a category and several products, returns the ids) and `put_in_cart(user_id, product_id, quantity)`. Everything is committed with its own sessions, so several threads can see it. The fixture ends with `TRUNCATE users, categories RESTART IDENTITY CASCADE`, which runs even when the test fails.
 - `post_webhook` (M8): sets `STRIPE_WEBHOOK_SECRET` to a test value and returns `post(event, timestamp=None, secret=<test secret>, signed_body=None)`. It turns the event dictionary into JSON bytes (or sends bytes as they are), signs them as Stripe does (`Stripe-Signature: t=<timestamp>,v1=<HMAC-SHA256 of "<timestamp>.<payload>">`) and posts the same bytes to `/webhooks/stripe`. `timestamp` and `secret` make a bad signature, `signed_body` signs a different body (tampered body). It uses the `client` fixture, so it also works from several threads.
+- Shared by the order, webhook and cancel tests (moved into `conftest.py` in M9; they used to live in `test_webhooks.py`): `stripe_create` (patches `stripe.checkout.Session.create`, sets a dummy `sk_test_` key), the autouse `session_expire` and `refund_create` (patch `stripe.checkout.Session.expire` and `stripe.Refund.create`, so the real Stripe API can never be reached by any test), `query_database`, `change_database`, `store` (a seller `store.first_seller`, a category, a logged-in customer `store.customer`; `store.product(stock, price, seller=None)` and `store.place_order(items, customer=None)` go through the real checkout API), `read_order` (order status, payment status, payment intent, session id, refund id), `read_stock`, `pay` (pays an order with a signed `checkout.session.completed` webhook) and the function `make_event(...)` (import it with `from tests.conftest import make_event`).
 - `create_product(seller_id, category_id, name=..., price=10000, stock=10, is_active=True, created_at=None, description="A test product")` (M3, `description` added in M5): inserts a product directly and returns its id. Pass `created_at` to control the order in tests.
 
 ## Completed milestones
@@ -93,14 +94,15 @@ Helper fixtures in `conftest.py` (M2, M3):
 - **M6: Cart.** Customer-only cart API (`/cart`, `/cart/count`, `/cart/items`), atomic upserts, per-line problem reporting, cart page, navbar Cart link with badge, Add to Cart on the product page, `?next=` login redirect. No schema change (no new migration; only the `CartItem.product` relationship was added). 109 tests passing (18 new in `tests/test_cart.py`).
 - **M7: Checkout and orders.** `POST /orders/checkout` (two stages: one locked database transaction, then the Stripe Checkout Session), order history (`GET /orders`, `GET /orders/{id}`), checkout, addresses, orders, order detail, success and cancelled pages, navbar links "My Orders" and "Addresses", "Proceed to checkout" on the cart page. `stripe==16.0.0` added. No schema change (no new migration). 124 tests passing (12 new in `tests/test_checkout.py`, 3 in `tests/test_checkout_concurrency.py`, plus the frontend file test now covers the new pages).
 - **M8: Stripe webhooks.** `POST /webhooks/stripe` (public, secured by the Stripe signature): `checkout.session.completed` marks the order paid, `checkout.session.expired` cancels it and gives the stock back, duplicates and retries are harmless, a late payment for a cancelled order is refunded. One service function, three repository functions for orders and one for products. No schema change (no new migration). 155 tests passing (31 new: 29 in `tests/test_webhooks.py`, 2 in `tests/test_webhooks_concurrency.py`; see "Webhooks (M8)").
+- **M9: Order lifecycle, cancellations and dashboards.** `POST /orders/{id}/cancel` (customer own order, or admin; stock restored; Stripe session expired for an unpaid order, full Stripe refund for a paid one; "retry refund" path), `PATCH /seller/orders/{id}/status` and `PATCH /admin/orders/{id}/status` (paid to shipped to delivered), seller and admin order read endpoints, `GET /seller/products/{id}`, a row lock on product edits, a late-payment refund that now marks the payment `refunded`. One small migration (`408881ba845e`: `refunded` payment status and `payments.stripe_refund_id`). Seller pages (products, product form, orders, order detail), admin pages (orders, order detail, users), cancel and retry-refund buttons on the customer order page. 213 tests passing (58 new; see "Order lifecycle (M9)").
 
 ## Pending milestones
 
-M9 Order lifecycle and seller/admin dashboard · M10 Hardening and finish
+M10 Hardening and finish
 
 ## Database schema
 
-Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M5 added the `products.search_vector` column and two indexes in `alembic/versions/099593dc45a9_add_product_search_vector.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
+Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M9 changed the payments status CHECK and added `payments.stripe_refund_id` in `alembic/versions/408881ba845e_payments_refunded_status_and_refund_id.py` (written by hand, because autogenerate does not see CHECK changes; the downgrade turns `refunded` rows into `succeeded` first). M5 added the `products.search_vector` column and two indexes in `alembic/versions/099593dc45a9_add_product_search_vector.py`. All tables have `id integer` primary key (auto-increment). Money columns are integers in paise. `timestamptz` columns default to `now()` on the server. `updated_at` is also refreshed by SQLAlchemy on ORM updates (`onupdate=func.now()`).
 
 **users**: `email` varchar(255) unique not null; `password_hash` not null; `full_name` not null; `role` varchar(20) default `customer`, CHECK in (`customer`, `seller`, `admin`); `is_active` bool default true; `created_at`.
 
@@ -118,11 +120,11 @@ Created by `alembic/versions/6fc51572ed70_create_initial_schema.py` (M1). M5 add
 
 **order_items**: `order_id` FK orders **ON DELETE CASCADE**; `product_id` FK products **ON DELETE RESTRICT**; `product_name` (snapshot); `unit_price` (snapshot) CHECK `> 0`; `quantity` CHECK `> 0`.
 
-**payments**: `order_id` FK orders (no action), UNIQUE (one payment per order); `stripe_checkout_session_id` varchar(255) nullable, UNIQUE; `stripe_payment_intent_id` nullable; `amount` CHECK `>= 0`; `currency` default `inr`; `status` default `pending`, CHECK in (`pending`, `succeeded`, `failed`); `created_at`; `updated_at`.
+**payments**: `order_id` FK orders (no action), UNIQUE (one payment per order); `stripe_checkout_session_id` varchar(255) nullable, UNIQUE; `stripe_payment_intent_id` nullable; `stripe_refund_id` varchar(255) nullable (M9: set when a refund was made; empty when Stripe said the charge was already refunded); `amount` CHECK `>= 0`; `currency` default `inr`; `status` default `pending`, CHECK in (`pending`, `succeeded`, `failed`, `refunded`) (M9 added `refunded`); `created_at`; `updated_at`.
 
 Constraints are named explicitly (`ck_<table>_<rule>`, `uq_cart_items_cart_id_product_id`); unique and FK constraints use Postgres default names.
 
-ORM relationships (only these six): `Product.category`, `Product.seller` (added in M3, no schema change), `Cart.items`, `CartItem.product` (added in M6, no schema change), `Order.items`, `Order.payment`. Everything else is queried by id in repositories.
+ORM relationships (only these seven): `Product.category`, `Product.seller` (added in M3, no schema change), `Cart.items`, `CartItem.product` (added in M6, no schema change), `Order.items`, `Order.payment`, `OrderItem.product` (added in M9, no schema change; the seller dashboard reads the seller of every line through it). Everything else is queried by id in repositories.
 
 ## Seed data
 
@@ -181,7 +183,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 - `Order.items` and `Cart.items` have no `back_populates` (only the four relationships requested exist).
 - Seed products use explicit `stock` and `is_active` per row, so the edge-case products (stock 1, stock 0, inactive) are visible in the data lists.
 
-## API endpoints (as of M8)
+## API endpoints (as of M9)
 
 | Method and path | Access | Notes |
 |---|---|---|
@@ -205,6 +207,7 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | PATCH `/products/{product_id}` | seller (own products) or admin (any) | Partial update. Customer: 403. Other seller's product or missing: 404 |
 | DELETE `/products/{product_id}` | seller (own products) or admin (any) | Soft delete, returns 204 (also when already inactive). Same rules as PATCH |
 | GET `/seller/products` | seller only | Paginated, the caller's own products, active or not, newest first |
+| GET `/seller/products/{product_id}` | seller only (own product) | M9. The public product shape, also for inactive products. Someone else's or a missing product: 404. Customer or admin: 403 |
 | GET `/cart` | customer only | The caller's cart (shape under "Cart (M6)"). Never changes data; creates no cart row |
 | GET `/cart/count` | customer only | `{"item_count": N}`, one query |
 | POST `/cart/items` | customer only | Returns 200. Body `{product_id, quantity (1 to 10, default 1)}`. Adds to the quantity. Missing or inactive product: 404. Over the limit: 409 |
@@ -214,11 +217,18 @@ Without deleting the volume: `alembic downgrade base`, then `alembic upgrade hea
 | POST `/orders/checkout` | customer only | Returns 201 `{order_id, checkout_url, total_amount}`. Body `{address_id}` only. See "Checkout and orders (M7)" |
 | GET `/orders` | customer only | Paginated, the caller's orders, newest first (`created_at DESC, id DESC`). Each item: `id, status, total_amount, created_at, item_count, items[{product_id, product_name, unit_price, quantity}]` |
 | GET `/orders/{order_id}` | customer only | `id, status, total_amount, created_at, shipping_address{...}, items[{..., line_total}], payment{status, amount, currency}`. Someone else's or a missing order: 404 `"Order not found"`. A non-numeric id: 422 |
+| POST `/orders/{order_id}/cancel` | customer (own order) or admin (any order) | M9. Returns 200 `{order_id, status, payment_status}`. Seller 403, no token 401, missing or someone else's order 404 `"Order not found"`, shipped or delivered 409, refund not possible 503 or 409, refund failed 502. See "Order lifecycle (M9)" |
+| GET `/seller/orders` | seller only | M9. Paginated (`page`, `page_size`), newest first. Only paid orders (payment `succeeded` or `refunded`) that contain the seller's products; only the seller's own lines. Item: `id, status, created_at, items[{product_id, product_name, unit_price, quantity, line_total}], seller_subtotal, has_other_sellers` |
+| GET `/seller/orders/{order_id}` | seller only (visibility rule) | M9. Same fields plus `shipping_address`. Not visible to this seller: 404 |
+| PATCH `/seller/orders/{order_id}/status` | seller only (visibility rule, and every item must be theirs) | M9. Body `{"status": "shipped" or "delivered"}` (anything else 422). 200 `{order_id, status}` |
+| GET `/admin/orders` | admin only | M9. Paginated, newest first, optional `status` (one of the five, otherwise 422). Item: `id, status, created_at, total_amount, customer_email, shipping_full_name, item_count` (total quantity) |
+| GET `/admin/orders/{order_id}` | admin only | M9. The list fields plus `user_id`, `shipping_address`, `items[...]`, `payment{status, amount, currency}`. Missing: 404 |
+| PATCH `/admin/orders/{order_id}/status` | admin only | M9. Same body and rules as the seller endpoint, without the seller checks |
 | POST `/webhooks/stripe` | public, **Stripe signature required** | Returns 200 `{"received": true}`. 400 bad signature or body, 503 secret not configured, 500 retryable failure. See "Webhooks (M8)" |
 
-All cart and order endpoints: no token gives 401, a seller or admin gives 403 (`require_customer`).
+All cart endpoints, `POST /orders/checkout`, `GET /orders` and `GET /orders/{id}`: no token gives 401, a seller or admin gives 403 (`require_customer`). `POST /orders/{id}/cancel` is the one order endpoint that also allows admins.
 
-The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html`, `/register.html`, `/addresses.html`, `/checkout.html`, `/orders.html`, `/order.html`, `/order-success.html`, `/order-cancelled.html` and everything under `/static` are public files. The pages that need a login are only HTML shells; their data comes from API endpoints that need a token.
+The pages `/`, `/products.html`, `/product.html`, `/cart.html`, `/login.html`, `/register.html`, `/addresses.html`, `/checkout.html`, `/orders.html`, `/order.html`, `/order-success.html`, `/order-cancelled.html`, `/seller-products.html`, `/seller-product-form.html`, `/seller-orders.html`, `/seller-order.html`, `/admin-orders.html`, `/admin-order.html`, `/admin-users.html` and everything under `/static` are public files. The pages that need a login are only HTML shells; their data comes from API endpoints that need a token.
 
 ## Auth flow (M2)
 
@@ -304,13 +314,20 @@ The seller's email and every other private field are never returned. Lists are w
 | `/order-cancelled.html` | `order_id` (optional, only used for a link). Login required | `frontend/order-cancelled.html`, `order-cancelled.js` |
 | `/orders.html` | `page` (default 1). Login required | `frontend/orders.html`, `orders.js` |
 | `/order.html` | `id` (positive whole number, otherwise "Order not found" and no API call). Login required | `frontend/order.html`, `order.js` |
+| `/seller-products.html` | `page`. Login required, seller | `frontend/seller-products.html`, `seller-products.js` |
+| `/seller-product-form.html` | `id` (optional: with it the form edits that product; anything but a positive whole number shows "Product not found" without calling the API). Login required, seller | `frontend/seller-product-form.html`, `seller-product-form.js` |
+| `/seller-orders.html` | `page`. Login required, seller | `frontend/seller-orders.html`, `seller-orders.js` |
+| `/seller-order.html` | `id` (same rule as `/order.html`). Login required, seller | `frontend/seller-order.html`, `seller-order.js` |
+| `/admin-orders.html` | `status` (one of the five, otherwise ignored), `page`. Login required, admin | `frontend/admin-orders.html`, `admin-orders.js` |
+| `/admin-order.html` | `id` (same rule). Login required, admin | `frontend/admin-order.html`, `admin-order.js` |
+| `/admin-users.html` | `page`. Login required, admin | `frontend/admin-users.html`, `admin-users.js` |
 | `/login.html` | `next` (optional, see "Cart (M6)") | `frontend/login.html`, `login.js` |
 | `/register.html` | `next` (optional, same rule) | `frontend/register.html`, `register.js` |
 
 | Script (`static/js/`) | What it does |
 |---|---|
 | `api.js` | `apiRequest(path, method, body)`: fetch + JSON + token header. On a 401 it removes the token and throws; redirects to `/login.html?next=...` only if `<body data-requires-login="true">`. Errors carry the HTTP status in `error.status` |
-| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads. For a **customer** it also adds a "Cart" link with the badge `<span id="cart-count">` and fills it from `GET /cart/count` (M6), and (M7) "My Orders" and "Addresses" links. Sellers and admins get none of them |
+| `layout.js` | Defines `SITE_NAME` (once, `"ShopEasy"`). Fills `#site-header` (navbar, with the search form added in M5) and `#site-footer`. Calls `GET /users/me` only when a token exists; any failure silently shows Login and Register. Logout removes the token and reloads. For a **customer** it also adds a "Cart" link with the badge `<span id="cart-count">` and fills it from `GET /cart/count` (M6), and (M7) "My Orders" and "Addresses" links. Sellers and admins get none of them. M9: a **seller** also gets "My Products" (`/seller-products.html`) and "Orders" (`/seller-orders.html`), an **admin** gets "Orders" (`/admin-orders.html`) and "Users" (`/admin-users.html`); nobody sees another role's links |
 | `product-card.js` | `buildProductCard(product)`: returns the `<a>` card used by the home and listing pages (image with one-time placeholder fallback, name, price, "Out of stock" label) |
 | `home.js` | Category cards (`GET /categories`) and the 8 newest products (`GET /products?page=1&page_size=8`) |
 | `products.js` | Sidebar (category links, filter form), heading, total count, product grid (20 per page) and Previous/Next links. Converts rupees from the URL to paise for the API (M5) |
@@ -321,10 +338,14 @@ The seller's email and every other private field are never returned. Lists are w
 | `order-success.js` | M7: checks `GET /orders/{id}` up to 15 times, 2 seconds apart, while the status is `pending_payment`. Says "Payment received. Thank you!" only when the API status is `paid` (or later `shipped`/`delivered`), "This order was cancelled." for `cancelled`, otherwise "We are still confirming your payment. Check My Orders in a moment." Arriving on the page never counts as proof of payment |
 | `order-cancelled.js` | M7: the static message plus links (the order, My Orders, products) |
 | `orders.js` | M7: My Orders, 10 per page, order cards with the first 3 items, Previous/Next links |
-| `order.js` | M7: order detail (address, items table, total, payment status). Holds its own status label objects (one for the order, one for the payment) |
+| `order.js` | M7: order detail (address, items table, total, payment status). Holds its own status label objects (one for the order, one for the payment). M9: the payment status is a badge (`Refunded` added); a "Cancel order" button for `pending_payment` and `paid` (`confirm()` first, different text for paid; calls `POST /orders/{id}/cancel`, reloads on success); for a cancelled order with payment `succeeded` it shows "Refund pending" and "Retry refund" (same endpoint). After a 502 it shows the API message and a "Reload" button (the order is cancelled, the page is stale) |
+| `seller-products.js` | M9: table of `GET /seller/products` (20 per page): image with placeholder fallback, name, price, stock (orange at 5 or fewer), Active/Inactive, "Edit" link, "Deactivate" (`DELETE /products/{id}`) or "Activate" (`PATCH {"is_active": true}`). Reloads after success, shows the API message on error |
+| `seller-product-form.js` | M9: one form for create (`POST /products`) and edit (`PATCH /products/{id}`, loaded from `GET /seller/products/{id}`). Price is typed in rupees and sent as `Math.round(Number(value) * 100)`; checks name, description, price above 0, whole-number stock, category before sending. In create mode it calls `GET /users/me` once, only to show "This page is for seller accounts." to other roles |
+| `seller-orders.js`, `seller-order.js` | M9: one card per visible order (the seller's own lines, "Your items total", "Includes other sellers' products"); detail page with the shipping address, the seller's items, "Mark as shipped" / "Mark as delivered" only when `has_other_sellers` is false (otherwise the "only an admin" note) |
+| `admin-orders.js`, `admin-order.js`, `admin-users.js` | M9: orders table with a GET status filter (pagination links keep it), order detail with customer email, address, all items, payment badge and the buttons "Mark as shipped", "Mark as delivered", "Cancel order" (`confirm()`), "Retry refund"; read-only users table |
 | `login.js`, `register.js` | The two forms (from M2). M6: after success they go to the `next` page (rule below) instead of always `/` |
 
-`static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, products page sidebar, product detail, states, responsive). `static/images/placeholder.svg` is the fallback image.
+`static/css/style.css` is the one stylesheet (variables, base, layout, navbar and footer, buttons, forms, cards and grid, category links and pagination, products page sidebar, product detail, states, responsive; M9 added "Order actions and payment badges" and "Seller and admin dashboards"). Dashboard tables sit in `.table-wrapper` (scrolls inside its own box); on small screens `.dashboard-table` keeps a minimum width, so it scrolls in its box and the page never scrolls sideways. `static/images/placeholder.svg` is the fallback image.
 
 ### How to add a new page
 
@@ -614,21 +635,13 @@ On a Stripe failure: `orders.status = cancelled`, `payments.status = failed`, `s
 
 Stripe ids (`stripe_checkout_session_id`, `stripe_payment_intent_id`) are never returned by any endpoint.
 
-### Known gaps until M9
+### Known gaps
 
-- There is no cancel button until M9.
 - Only card payments are supported (asynchronous payment methods are not handled).
-- The cart is empty after an abandoned payment (the customer has to add the items again; the order is still in My Orders).
+- Only full refunds (no partial refunds), and no returns after delivery.
+- The cart is empty after an abandoned payment (the customer has to add the items again; the order is still in My Orders). There is no "pay again" button.
 
-### Notes for M9 (order lifecycle and dashboards)
-
-- Cancelling a `pending_payment` order must ALSO expire the Stripe session (`stripe.checkout.Session.expire`), otherwise the customer could still pay for a cancelled order. (The late-payment refund of M8 would catch it, but it should not happen.)
-- Cancelling a `paid` order restores the stock and creates a Stripe refund (the payment intent id is saved by M8 in `payments.stripe_payment_intent_id`).
-- Every code path that changes an order must lock the order row first (`order_repository.lock_order`) and re-check its status inside the lock.
-- Stock restores use the same atomic, ascending-product-id increments as M8 (`product_repository.increase_stock`, see `webhook_service.py`).
-- Allowed transitions: `pending_payment -> paid` (the webhook ONLY), `paid -> shipped -> delivered` (seller or admin), and the cancellation rules above. Everything else is rejected.
-- Sellers need an orders view filtered to the orders that contain their own products (`order_items.product_id` joined to `products.seller_id`).
-- The order detail and list pages already show every status label (`pending_payment`, `paid`, `shipped`, `delivered`, `cancelled`).
+The M9 notes that used to be here are done; see "Order lifecycle (M9)".
 
 ### Key design decisions (M7)
 
@@ -660,7 +673,7 @@ The service is one function, `webhook_service.handle_stripe_event(db, payload, s
 |---|---|
 | `checkout.session.completed`, `payment_status = "paid"`, order `pending_payment` | Order `paid`, payment `succeeded`, `stripe_payment_intent_id` saved. Commit, 200 |
 | same, order already `paid` (duplicate) / `shipped` / `delivered` | Nothing changes, 200 |
-| same, order `cancelled` (late payment) | Order stays cancelled. The payment intent is saved and committed, then a refund is created (see below). 200, or 500 if the refund call fails |
+| same, order `cancelled` (late payment) | Payment already `refunded`: 200, no Stripe call. Otherwise the order stays cancelled, the payment intent is saved and committed, then a refund is created and the payment becomes `refunded` (see below). 200, or 500 if the refund call fails |
 | `checkout.session.completed`, `payment_status` not `"paid"` | Nothing changes, 200 |
 | `checkout.session.completed`, `amount_total` or `currency` (lowercased) different from the payment's | Error is logged, nothing changes, 200 (a bug to investigate, not something Stripe should retry) |
 | `checkout.session.expired`, order `pending_payment` | Order `cancelled`, payment `failed`, stock of every order item given back. One transaction. 200 |
@@ -695,7 +708,7 @@ Lock order: this endpoint locks the order row, then updates products in ascendin
 
 ### The late-payment refund
 
-If `checkout.session.completed` (paid, amounts match) arrives for an order that is already `cancelled` (for example the Stripe call in checkout timed out, the order was cancelled by the failure path, but the session still existed and was paid), the order is NOT reactivated and the stock stays as it is (it was already given back). The service saves the payment intent id and commits, then calls `stripe.Refund.create(payment_intent=..., idempotency_key="late-payment-refund-<order id>")`, outside any transaction. If the refund call raises `stripe.StripeError` the answer is 500, so Stripe delivers the event again; the retry reaches the same code and calls the refund again, and the idempotency key makes that safe. A repeated delivery after a successful refund calls it again too (nothing in our tables records "refunded"; Stripe returns the same refund because of the key). The payment stays `failed`.
+If `checkout.session.completed` (paid, amounts match) arrives for an order that is already `cancelled` (for example the Stripe call in checkout timed out, the order was cancelled by the failure path, or the customer cancelled and still paid before the session was expired), the order is NOT reactivated and the stock stays as it is (it was already given back). If the payment is already `refunded` the answer is 200 and Stripe is not called. Otherwise the service saves the payment intent id and commits, then calls `stripe.Refund.create(payment_intent=..., idempotency_key="late-payment-refund-<order id>")`, outside any transaction. On success a small transaction sets the payment to `refunded` and saves `stripe_refund_id` (M9; before M9 the payment stayed `failed` and every delivery called the refund again). If Stripe answers `charge_already_refunded` (for example the customer's own cancel already refunded it) that counts as success too, with no refund id (a small M9 addition, so such a retry cannot loop forever). If the refund call raises any other `stripe.StripeError` the answer is 500, so Stripe delivers the event again; the retry reaches the same code and the idempotency key makes that safe.
 
 ### Logging
 
@@ -725,6 +738,118 @@ Without the Stripe CLI the endpoint can still be checked with a wrong signature:
   - The success page polling window was not changed (see the M8 summary).
 - **Tests:** `stripe.Refund.create` is patched in an autouse fixture, so the real Stripe API can never be reached. Orders are made through the real checkout API with `stripe.checkout.Session.create` patched. The concurrency tests post from two threads through the `client` (lined up by a `threading.Barrier`, fail if a thread is still alive after 15 seconds) and count the "order paid" / "stock restored" log lines to prove the order was changed exactly once. They passed 20 runs in a row together with `tests/test_checkout_concurrency.py`, and the expired test fails when `FOR UPDATE` is removed from `lock_order`.
 - **Not tested here:** the real flow with the Stripe CLI (`stripe listen`, a real payment, `stripe events resend`) needs the CLI and a webhook secret; see "Local webhook setup".
+
+## Order lifecycle (M9)
+
+### Allowed order changes (everything else is 409)
+
+| From | To | Who | Side effects |
+|---|---|---|---|
+| `pending_payment` | `paid` | Stripe webhook only (M8) | none |
+| `paid` | `shipped` | seller (only when every item in the order is theirs) or admin | none |
+| `shipped` | `delivered` | seller (same rule) or admin | none |
+| `pending_payment` | `cancelled` | the customer who owns the order, or an admin | stock restored, payment `failed`, Stripe session expired |
+| `paid` | `cancelled` | the customer who owns the order, or an admin | stock restored, full Stripe refund |
+
+`shipped` and `delivered` orders can never be cancelled (no returns). Sellers cannot cancel; customers cannot change a status. Every code path that changes an order locks the order row first (`order_repository.lock_order`, `SELECT ... FOR UPDATE`) and reads the status again inside the lock.
+
+### Payment status `refunded`, and `stripe_refund_id`
+
+`payments.status` now also allows `refunded`; `payments.stripe_refund_id` holds the Stripe refund id (NULL when Stripe said the charge was already refunded). A paid-then-cancelled order is `cancelled` with payment `succeeded` from the moment of the cancel until the refund is really done; then the payment becomes `refunded`. `order_repository.mark_payment_refunded` is one atomic `UPDATE ... WHERE id = ? AND status <> 'refunded'`, so a second call can never erase the refund id.
+
+### The cancel flow (`order_lifecycle_service.cancel_order`)
+
+`POST /orders/{order_id}/cancel`. The role check (customer or admin, otherwise 403) is inline in the service. `REFUND_KEY_PREFIX = "cancel-refund-"` is the constant at the top of the file.
+
+**Stage 1, one transaction:** lock the order (a customer only finds their own: `lock_order(db, order_id, user_id)`, so someone else's order is never even locked; not found is 404), read the status in the lock, load the payment and the items. Then by status:
+- `shipped` / `delivered`: 409 "A shipped order can no longer be cancelled."
+- `cancelled`: if the payment is not `succeeded` (failed or refunded), 200 and nothing changes (a double click is harmless). If it is `succeeded` a refund is still owed: the **retry refund** path. It checks the Stripe key rule (503) and that a payment intent exists, then jumps to stage 2 step g.
+- `pending_payment`: order `cancelled`, payment `failed`, stock restored, `updated_at` set, commit.
+- `paid`: BEFORE changing anything the Stripe key rule (empty key or a key that does not start with `sk_test_`: 503, nothing changed) and the payment intent check (none: logged, 409 "This order has no payment to refund. Please contact support.") run. Then the order becomes `cancelled`, the stock is restored, commit. The payment stays `succeeded`.
+
+Stock is restored with one atomic `UPDATE products SET stock = stock + n` per product (`product_repository.increase_stock`), in ascending product id order, like the M8 webhook.
+
+**Stage 2, after the commit, no transaction open:**
+- f. A cancelled `pending_payment` order with a Stripe session id: `stripe.checkout.Session.expire(session id)` (10 second timeout, `api_key=settings.STRIPE_SECRET_KEY`). A `stripe.StripeError` is only logged as a warning (only the error class name; Stripe error text can contain part of a key). It is safe because a customer who still pays is refunded by the M8 late-payment refund (the safety net). No session id, or a key that is not a test key: no call.
+- g. If a refund is owed: `stripe.Refund.create(payment_intent=..., idempotency_key="cancel-refund-<order id>")` (10 second timeout). Success: a small transaction sets the payment to `refunded` and saves `stripe_refund_id`. `charge_already_refunded` (`error.code`): counts as success, `refunded`, no refund id. Any other `stripe.StripeError`: logged (class and code, never the text or a key), then **502** "Your order has been cancelled, but the refund could not be completed yet. Open the order and press Retry refund." The cancellation stays committed.
+- h. 200 `{order_id, status, payment_status}` with the final statuses.
+
+**Why the commit comes before the Stripe call.** A database transaction must never stay open during a network call (it would hold the order and product locks for up to the timeout). The database is the source of truth: if Stripe fails after the commit, the order is correctly cancelled and the stock is back, and the only thing missing is the money, which the "retry refund" path (the same endpoint, pressed again by the customer or an admin) can finish safely because the idempotency key is the same. The other order (Stripe first, then commit) could refund money for an order that is still paid in our tables.
+
+### Status changes (`order_lifecycle_service.update_order_status`)
+
+One function shared by `PATCH /seller/orders/{id}/status` and `PATCH /admin/orders/{id}/status` (the router passes the logged-in user; the seller router uses `require_seller`, the admin router `require_admin`). The body is `{"status": "shipped" | "delivered"}` (a `Literal`: `paid`, `cancelled`, `pending_payment` and `banana` are 422). Steps: lock the order and read the status in the lock; load the seller of every line and the payment; for a seller (a) not visible gives 404 "Order not found", (b) lines of other sellers give 403 "This order includes products from other sellers. Only an admin can update its status."; an order already in the requested status gives 200 and changes nothing; only `paid` to `shipped` and `shipped` to `delivered` are allowed, everything else is 409 "Cannot change an order from <current> to <requested>."; then save and commit.
+
+### Seller visibility and mixed orders
+
+A seller sees an order only if (a) its payment status is `succeeded` or `refunded` (so abandoned and unpaid checkouts never appear) and (b) at least one line is theirs (an `EXISTS` condition on `order_items` joined to `products.seller_id`). Everything else is 404. A seller sees only their own lines (never the other sellers' lines) and never the customer's email, but they do see the shipping address. A cancelled order whose payment is `refunded` is still visible (cancelled, payment `failed` is not). One order can hold products of several sellers but has one status, so a seller can change the status only when every line is theirs: `has_other_sellers` is true when the order has more lines than the seller has; then only an admin can change the status. The lists load lines and products with `selectinload(Order.items).joinedload(OrderItem.product)` (3 queries per page, no query per order). Neither seller nor admin responses contain Stripe ids or password hashes; seller responses never contain the customer email.
+
+### Lock order (why there is no deadlock)
+
+An order row is locked BEFORE its products are changed, and products are changed in ascending product id order. Checkout locks the cart row and then the product rows, and creates the order only after the products are locked, so no checkout transaction ever waits for an order lock while holding product locks; the webhook and the cancel/status paths lock the order row first and then touch products (atomic increments, ascending id). A product edit (`PATCH` / `DELETE /products/{id}`, M9) locks only one product row. So no cycle can form: orders (lowest id first inside one order) -> products (ascending id), and checkout never goes from products to orders while another transaction goes the other way.
+
+### Product edits are locked too
+
+`product_service.update_product` and `deactivate_product` now call `product_repository.lock_products(db, [product_id])` (the existing `SELECT ... FOR UPDATE` query) first, so a seller's stock edit cannot interleave with a checkout reserving the same stock. Role (403) is checked before the lock; early exits call `db.rollback()` to release it. `GET /seller/products/{id}` (new) does not lock.
+
+### Where 403, 404, 409, 502 and 503 come from
+
+- **403:** wrong role (`require_*` or the inline checks); a seller changing the status of a mixed order.
+- **404:** ownership and visibility failures: someone else's order (`/orders/{id}`, cancel), an order a seller may not see, someone else's product, a missing resource.
+- **409:** invalid status change, cancelling a shipped or delivered order, a paid order without a payment intent.
+- **502:** the refund call failed after the cancellation was committed (cancel, retry refund); the checkout Stripe call failed (M7, cart restored).
+- **503:** Stripe not configured or not a test key: checkout (before any database work), refund paths of cancel (nothing changed), webhook secret empty, `/health` database down.
+
+### Key design decisions (M9)
+
+- **Decisions CLAUDE.md and the milestone did not cover:**
+  - "shipped to paid" cannot be asked for: the request body only accepts `shipped` and `delivered`, so `paid` is a 422, not a 409. The test checks the 422 and that the order is unchanged.
+  - `lock_order` got an optional `user_id` (a customer's cancel only locks their own order).
+  - `mark_payment_refunded` is an atomic UPDATE (see above); the late-payment webhook uses it too.
+  - The webhook treats `charge_already_refunded` as success (the milestone only asked for it in the cancel path), so the duplicate/late combination cannot make Stripe retry forever.
+  - A pending cancel only calls `Session.expire` with an `sk_test_` key (the same test-key rule as everywhere, so a live key can never be used).
+  - The retry-refund path also checks for a payment intent (409 if missing), like the paid path.
+  - Admin `item_count` is the total quantity (same meaning as in `GET /orders`). The admin detail also repeats `item_count`, `customer_email` and `shipping_full_name` from the list item.
+  - The seller product form (create mode) calls `GET /users/me` once, only so a non-seller sees "This page is for seller accounts."; the form's price and stock also have the database integer limit as an upper bound (otherwise a huge number would be a 500).
+  - The retry-refund and cancel buttons use the same endpoint; on the admin page a 502 just shows the message (the button comes back, so pressing it again is the retry).
+  - A concurrent cancel of a `pending_payment` order while checkout stage 2 is still creating the Stripe session: the payment has no session id yet, so nothing is expired; the session that checkout creates a moment later stays open until it expires by itself, and if it is paid anyway the M8 late-payment refund returns the money.
+- **Tests:** `tests/test_order_cancel.py` (21), `tests/test_order_status.py` (33), `tests/test_order_lifecycle_concurrency.py` (3: cancel against ship, two cancels, cancel of a pending order against the `completed` webhook; they passed 20 runs in a row; with `FOR UPDATE` removed from `lock_order`, 2 of the 3 failed in every one of 6 runs), plus two changed and one new M8 webhook test. `Session.expire` and `Refund.create` are patched in autouse fixtures.
+- **Tested by hand** (headless Chrome driven with Playwright from a temporary virtual environment outside the project): every new page as seller, admin and customer (the "for ... accounts" messages for the wrong role), mixed and single-seller orders, Mark as shipped and delivered as seller and as admin, customer cancel of an unpaid order (`confirm()` text, order cancelled, payment Failed), customer cancel of a paid order with a fake payment intent (Stripe refused: the 502 message, "Reload", then "Refund pending" with "Retry refund"), `<script>` text in a product name and an address shown as plain text, the product form (all validation messages, a rejected image URL, create, edit, deactivate and activate, the product leaving and returning to the storefront search), 375px wide pages without sideways scrolling. **Full run with a real `sk_test_` key and `stripe listen` (Stripe CLI 1.53.1, run from a temporary folder, key passed through `STRIPE_API_KEY`), card 4242 on the hosted Stripe page, driven with Playwright:** a mixed order (one product of each seller) became Paid through the real webhook; seller1 saw only their own line, `has_other_sellers` true, no "Mark as shipped" and no customer email; the admin shipped and delivered it and the customer's My Orders followed; a single-seller order was shipped and delivered by its seller and a cancel by the customer was refused (409, no button); a paid order cancelled by the customer ended `cancelled` / `refunded` with the refund id saved, the stock back, and the charge shown as refunded in Stripe (`refunded: true`, full amount); an unpaid order cancelled by the customer had its stock back and the Checkout Session `expired` in Stripe (the `checkout.session.expired` event then arrived and changed nothing); `stripe events resend` of a `completed` event changed nothing. The dev database was restored to its seeded state afterwards.
+
+**Dev gotcha found during the run:** checkout uses `order-<id>` as the Stripe idempotency key, and Stripe remembers a key for 24 hours. After resetting or restoring the dev database the order id counter starts again, and a new order can reuse a key with different parameters: Stripe answers 400 (idempotency error), checkout returns 502 and the order is cancelled (the failure path worked as designed). Fix for dev: `SELECT setval('orders_id_seq', 6000)` (the dev counter was set to 6000 after the run). Not a problem on a database that is never reset.
+
+### Notes for M10 (security and hardening pass)
+
+**Every endpoint with its role and ownership rule:**
+
+| Endpoint | Role | Ownership / visibility rule |
+|---|---|---|
+| `GET /health` | public | none |
+| `POST /auth/register`, `POST /auth/login` | public | none |
+| `GET`, `PATCH /users/me` | any logged-in user | own user only |
+| `GET`, `POST /users/me/addresses`, `PUT`, `DELETE /users/me/addresses/{id}` | any logged-in user | own addresses only (404 otherwise) |
+| `GET /admin/users` | admin | none |
+| `GET /categories` | public | none |
+| `POST`, `PUT`, `DELETE /categories...` | admin | none |
+| `GET /products`, `GET /products/{id}` | public | active products only (404 for inactive) |
+| `POST /products` | seller | `seller_id` is the caller |
+| `PATCH`, `DELETE /products/{id}` | seller or admin (role check inline) | a seller only their own (404 otherwise); product row locked |
+| `GET /seller/products` | seller | own products only |
+| `GET /seller/products/{id}` | seller | own product only (404 otherwise) |
+| `/cart...` (5 endpoints) | customer | own cart only |
+| `POST /orders/checkout` | customer | own cart, own address (404) |
+| `GET /orders`, `GET /orders/{id}` | customer | own orders only (404 otherwise) |
+| `POST /orders/{id}/cancel` | customer or admin (inline) | a customer only their own order (404); admin any |
+| `GET /seller/orders`, `GET /seller/orders/{id}` | seller | paid orders (payment `succeeded`/`refunded`) with at least one of the seller's products; only own lines; no customer email |
+| `PATCH /seller/orders/{id}/status` | seller | same visibility (404) and every line must be theirs (403) |
+| `GET /admin/orders`, `GET /admin/orders/{id}`, `PATCH /admin/orders/{id}/status` | admin | any order |
+| `POST /webhooks/stripe` | public | the Stripe signature |
+
+**Things to check:** the 403 versus 404 rules above (404 for ownership and visibility, 403 for roles); the places that return 502 and 503 (see above); no Stripe id, password hash or (for sellers) customer email in any response; no secret or Stripe error text in logs.
+
+**Indexes the sellers' order queries rely on** (check them with `EXPLAIN ANALYZE` on a big table, like the M5 measurements): `products.seller_id` (`ix_products_seller_id`) for the EXISTS and the lines; `payments.order_id` (the UNIQUE constraint) for the payment join; `orders.created_at, id` ordering has **no index** (only `ix_orders_user_id` and `ix_orders_status` exist); and **`order_items.order_id` has no index** (the foreign key does not create one in Postgres), so the EXISTS subquery and the line loading probably scan `order_items`. The admin list sorts all orders by `created_at DESC, id DESC` (no index) and filters by `status` (`ix_orders_status`). Measure first; likely candidates are `order_items (order_id)` and `orders (created_at DESC, id DESC)`.
+
+**README:** it must explain the Stripe CLI setup (see "Local webhook setup" under "Webhooks (M8)" and `CLAUDE.md`), plus the cancel/refund flows and how to try them.
 
 ## Key design decisions (M6)
 

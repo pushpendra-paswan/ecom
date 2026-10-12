@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 import time
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import bcrypt
 import psycopg
@@ -280,3 +282,183 @@ def post_webhook(client, monkeypatch):
         )
 
     return post
+
+
+# ---------- shared by the order, webhook and cancel tests (M8, M9) ----------
+
+@pytest.fixture
+def stripe_create(monkeypatch):
+    # A dummy test key and a fake Stripe Checkout call (the real Stripe API is never called)
+    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_dummy")
+    with patch("stripe.checkout.Session.create") as mock_create:
+        mock_create.side_effect = lambda **kwargs: SimpleNamespace(
+            id="cs_test_" + kwargs["idempotency_key"], url="https://checkout.stripe.com/c/pay/fake"
+        )
+        yield mock_create
+
+
+@pytest.fixture(autouse=True)
+def session_expire():
+    # Every test gets a fake "expire session" call, so the real Stripe API can never be reached
+    with patch("stripe.checkout.Session.expire") as mock_expire:
+        mock_expire.return_value = SimpleNamespace(id="cs_test_expired")
+        yield mock_expire
+
+
+@pytest.fixture(autouse=True)
+def refund_create():
+    # Every test gets a fake refund call, so the real Stripe API can never be reached
+    with patch("stripe.Refund.create") as mock_refund:
+        mock_refund.return_value = SimpleNamespace(id="re_test_1")
+        yield mock_refund
+
+
+@pytest.fixture
+def query_database(test_engine):
+    # Returns a function that runs a SELECT on the test database and gives a list of dicts
+    def query(sql, **values):
+        with test_engine.connect() as connection:
+            rows = connection.execute(text(sql), values).mappings().all()
+        return [dict(row) for row in rows]
+
+    return query
+
+
+@pytest.fixture
+def change_database(test_engine):
+    # Returns a function that runs an UPDATE on the test database
+    def change(sql, **values):
+        with test_engine.begin() as connection:
+            connection.execute(text(sql), values)
+
+    return change
+
+
+@pytest.fixture
+def store(create_user, create_category, create_product, auth_headers, client, stripe_create):
+    # A seller, a category, a logged-in customer, and functions that make products and place orders
+    seller_id = create_user("seller@example.com", role="seller")
+    category_id = create_category("Books")
+    create_user("customer@example.com")
+
+    class Store:
+        customer = auth_headers("customer@example.com")
+        first_seller = seller_id
+
+        def product(self, stock=10, price=10000, seller=None):
+            # seller is a user id; the default seller is the first one
+            if seller is None:
+                seller = seller_id
+            return create_product(seller, category_id, stock=stock, price=price)
+
+        def place_order(self, items, customer=None):
+            # customer is a headers dictionary; the default customer is customer@example.com
+            if customer is None:
+                customer = self.customer
+            # items is a list of (product_id, quantity). Goes through the real checkout API.
+            address = client.post(
+                "/users/me/addresses",
+                json={
+                    "full_name": "Rohan Gupta",
+                    "phone": "9876543210",
+                    "line1": "12 MG Road",
+                    "city": "Bengaluru",
+                    "state": "Karnataka",
+                    "postal_code": "560001",
+                    "country": "India",
+                },
+                headers=customer,
+            )
+            for product_id, quantity in items:
+                response = client.post(
+                    "/cart/items", json={"product_id": product_id, "quantity": quantity}, headers=customer
+                )
+                assert response.status_code == 200
+            response = client.post(
+                "/orders/checkout", json={"address_id": address.json()["id"]}, headers=customer
+            )
+            assert response.status_code == 201
+            body = response.json()
+            return SimpleNamespace(
+                id=body["order_id"],
+                total_amount=body["total_amount"],
+                session_id="cs_test_order-" + str(body["order_id"]),
+            )
+
+    return Store()
+
+
+@pytest.fixture
+def read_order(query_database):
+    # Returns a function that gives the order and payment columns we care about
+    def read(order_id):
+        rows = query_database(
+            "SELECT o.status AS order_status, o.updated_at AS order_updated_at,"
+            " p.status AS payment_status, p.updated_at AS payment_updated_at,"
+            " p.stripe_payment_intent_id AS payment_intent, p.stripe_checkout_session_id AS session_id,"
+            " p.stripe_refund_id AS refund_id"
+            " FROM orders o JOIN payments p ON p.order_id = o.id WHERE o.id = :order_id",
+            order_id=order_id,
+        )
+        return rows[0]
+
+    return read
+
+
+@pytest.fixture
+def read_stock(query_database):
+    # Returns a function that gives the stock of a product
+    def read(product_id):
+        return query_database("SELECT stock FROM products WHERE id = :id", id=product_id)[0]["stock"]
+
+    return read
+
+
+def make_event(
+    event_type,
+    session_id,
+    order,
+    payment_status="paid",
+    amount_total=None,
+    currency="inr",
+    payment_intent="pi_test_1",
+    metadata=None,
+    event_id="evt_test_1",
+):
+    # A minimal but realistic Stripe event. The order can be None (no metadata).
+    if amount_total is None:
+        amount_total = order.total_amount
+    if metadata is None:
+        metadata = {"order_id": str(order.id)}
+    return {
+        "id": event_id,
+        "object": "event",
+        "type": event_type,
+        "data": {
+            "object": {
+                "id": session_id,
+                "object": "checkout.session",
+                "payment_status": payment_status,
+                "amount_total": amount_total,
+                "currency": currency,
+                "payment_intent": payment_intent,
+                "metadata": metadata,
+            }
+        },
+    }
+
+
+@pytest.fixture
+def pay(post_webhook):
+    # Returns a function that pays an order the real way: the "completed" webhook event
+    def pay_order(order):
+        event = make_event(
+            "checkout.session.completed",
+            order.session_id,
+            order,
+            payment_intent="pi_test_" + str(order.id),
+            event_id="evt_paid_" + str(order.id),
+        )
+        assert post_webhook(event).status_code == 200
+
+    return pay_order

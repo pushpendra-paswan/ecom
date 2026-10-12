@@ -1,160 +1,12 @@
 import json
 import logging
 import time
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 import stripe
-from sqlalchemy import text
 
 from app.core.config import settings
-
-
-@pytest.fixture
-def stripe_create(monkeypatch):
-    # A dummy test key and a fake Stripe Checkout call (the real Stripe API is never called)
-    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_dummy")
-    with patch("stripe.checkout.Session.create") as mock_create:
-        mock_create.side_effect = lambda **kwargs: SimpleNamespace(
-            id="cs_test_" + kwargs["idempotency_key"], url="https://checkout.stripe.com/c/pay/fake"
-        )
-        yield mock_create
-
-
-@pytest.fixture(autouse=True)
-def refund_create():
-    # Every test gets a fake refund call, so the real Stripe API can never be reached
-    with patch("stripe.Refund.create") as mock_refund:
-        mock_refund.return_value = SimpleNamespace(id="re_test_1")
-        yield mock_refund
-
-
-@pytest.fixture
-def query_database(test_engine):
-    # Returns a function that runs a SELECT on the test database and gives a list of dicts
-    def query(sql, **values):
-        with test_engine.connect() as connection:
-            rows = connection.execute(text(sql), values).mappings().all()
-        return [dict(row) for row in rows]
-
-    return query
-
-
-@pytest.fixture
-def change_database(test_engine):
-    # Returns a function that runs an UPDATE on the test database
-    def change(sql, **values):
-        with test_engine.begin() as connection:
-            connection.execute(text(sql), values)
-
-    return change
-
-
-@pytest.fixture
-def store(create_user, create_category, create_product, auth_headers, client, stripe_create):
-    # A seller, a category, a logged-in customer, and functions that make products and place orders
-    seller_id = create_user("seller@example.com", role="seller")
-    category_id = create_category("Books")
-    create_user("customer@example.com")
-
-    class Store:
-        customer = auth_headers("customer@example.com")
-
-        def product(self, stock=10, price=10000):
-            return create_product(seller_id, category_id, stock=stock, price=price)
-
-        def place_order(self, items):
-            # items is a list of (product_id, quantity). Goes through the real checkout API.
-            address = client.post(
-                "/users/me/addresses",
-                json={
-                    "full_name": "Rohan Gupta",
-                    "phone": "9876543210",
-                    "line1": "12 MG Road",
-                    "city": "Bengaluru",
-                    "state": "Karnataka",
-                    "postal_code": "560001",
-                    "country": "India",
-                },
-                headers=self.customer,
-            )
-            for product_id, quantity in items:
-                response = client.post(
-                    "/cart/items", json={"product_id": product_id, "quantity": quantity}, headers=self.customer
-                )
-                assert response.status_code == 200
-            response = client.post(
-                "/orders/checkout", json={"address_id": address.json()["id"]}, headers=self.customer
-            )
-            assert response.status_code == 201
-            body = response.json()
-            return SimpleNamespace(
-                id=body["order_id"],
-                total_amount=body["total_amount"],
-                session_id="cs_test_order-" + str(body["order_id"]),
-            )
-
-    return Store()
-
-
-@pytest.fixture
-def read_order(query_database):
-    # Returns a function that gives the order and payment columns we care about
-    def read(order_id):
-        rows = query_database(
-            "SELECT o.status AS order_status, o.updated_at AS order_updated_at,"
-            " p.status AS payment_status, p.updated_at AS payment_updated_at,"
-            " p.stripe_payment_intent_id AS payment_intent, p.stripe_checkout_session_id AS session_id"
-            " FROM orders o JOIN payments p ON p.order_id = o.id WHERE o.id = :order_id",
-            order_id=order_id,
-        )
-        return rows[0]
-
-    return read
-
-
-@pytest.fixture
-def read_stock(query_database):
-    # Returns a function that gives the stock of a product
-    def read(product_id):
-        return query_database("SELECT stock FROM products WHERE id = :id", id=product_id)[0]["stock"]
-
-    return read
-
-
-def make_event(
-    event_type,
-    session_id,
-    order,
-    payment_status="paid",
-    amount_total=None,
-    currency="inr",
-    payment_intent="pi_test_1",
-    metadata=None,
-    event_id="evt_test_1",
-):
-    # A minimal but realistic Stripe event. The order can be None (no metadata).
-    if amount_total is None:
-        amount_total = order.total_amount
-    if metadata is None:
-        metadata = {"order_id": str(order.id)}
-    return {
-        "id": event_id,
-        "object": "event",
-        "type": event_type,
-        "data": {
-            "object": {
-                "id": session_id,
-                "object": "checkout.session",
-                "payment_status": payment_status,
-                "amount_total": amount_total,
-                "currency": currency,
-                "payment_intent": payment_intent,
-                "metadata": metadata,
-            }
-        },
-    }
+from tests.conftest import make_event
 
 
 @pytest.fixture
@@ -387,6 +239,9 @@ def test_late_payment_refunds_and_keeps_the_order_cancelled(
     state = read_order(order.id)
     assert state["order_status"] == "cancelled"
     assert state["payment_intent"] == "pi_test_late"
+    # The payment is refunded and the refund id is saved
+    assert state["payment_status"] == "refunded"
+    assert state["refund_id"] == "re_test_1"
     # One refund, for this payment intent, with the idempotency key
     assert refund_create.call_count == 1
     assert refund_create.call_args.kwargs["payment_intent"] == "pi_test_late"
@@ -394,11 +249,12 @@ def test_late_payment_refunds_and_keeps_the_order_cancelled(
     # The stock was already given back when the order was cancelled, and is not touched again
     assert read_stock(product_id) == 10
 
-    # A second delivery of the same event does not change the order
+    # A second delivery of the same event changes nothing and makes no second refund call
     state_after_first = read_order(order.id)
     second = post_webhook(late_event)
     assert second.status_code == 200
     assert read_order(order.id) == state_after_first
+    assert refund_create.call_count == 1
     assert read_stock(product_id) == 10
 
 
@@ -412,6 +268,8 @@ def test_failed_refund_gives_500_and_the_retry_refunds_again(post_webhook, store
     assert response.status_code == 500
     assert read_order(order.id)["order_status"] == "cancelled"
     assert refund_create.call_count == 1
+    # The refund did not work, so the payment is not marked refunded
+    assert read_order(order.id)["payment_status"] == "failed"
 
     # The retry reaches the same code and calls the refund again, this time it works
     refund_create.side_effect = None
@@ -420,6 +278,7 @@ def test_failed_refund_gives_500_and_the_retry_refunds_again(post_webhook, store
     assert refund_create.call_count == 2
     assert refund_create.call_args.kwargs["idempotency_key"] == "late-payment-refund-" + str(order.id)
     assert read_order(order.id)["order_status"] == "cancelled"
+    assert read_order(order.id)["payment_status"] == "refunded"
 
 
 # ---------- finding the payment ----------
@@ -526,3 +385,17 @@ def test_nothing_sensitive_is_logged(post_webhook, pending_order, caplog):
         assert signature_header not in caplog.text
         assert signature_header.split("v1=")[1] not in caplog.text
     assert "sk_test_dummy" not in caplog.text
+
+
+def test_late_payment_for_an_already_refunded_charge_counts_as_refunded(post_webhook, store, refund_create, read_order):
+    product_id, order, late_event = late_payment_setup(store, post_webhook)
+    refund_create.side_effect = stripe.InvalidRequestError("already refunded", "charge", code="charge_already_refunded")
+
+    response = post_webhook(late_event)
+
+    # Stripe says the money is already back: success, the payment is refunded (no refund id to save)
+    assert response.status_code == 200
+    state = read_order(order.id)
+    assert state["order_status"] == "cancelled"
+    assert state["payment_status"] == "refunded"
+    assert state["refund_id"] is None

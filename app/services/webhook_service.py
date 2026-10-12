@@ -143,8 +143,19 @@ def handle_stripe_event(db: Session, payload: bytes, signature_header: str | Non
                 return {"received": True}
 
             if order.status == "cancelled":
-                # A late payment for an order we already cancelled. Do NOT bring the order back.
-                # Save the payment intent, then give the money back.
+                # A late payment for an order we already cancelled. If the money was already given back
+                # (by an earlier delivery of this event, or by the customer's cancel), there is nothing to do.
+                if payment.status == "refunded":
+                    db.rollback()
+                    logger.info(
+                        "Stripe webhook: event=%s type=%s order=%s outcome=no change (payment already refunded)",
+                        event_id,
+                        event_type,
+                        order_id,
+                    )
+                    return {"received": True}
+
+                # Do NOT bring the order back. Save the payment intent, then give the money back.
                 if not isinstance(payment_intent_id, str) or payment_intent_id == "":
                     db.rollback()
                     logger.error(
@@ -167,20 +178,28 @@ def handle_stripe_event(db: Session, payload: bytes, signature_header: str | Non
                 # The idempotency key makes a repeated refund safe. If it fails we answer 500, and
                 # Stripe delivers the event again, which reaches this same code and tries again.
                 # The stock stays as it is: it was already given back when the order was cancelled.
+                refund_id = None
                 try:
-                    stripe.Refund.create(
+                    refund = stripe.Refund.create(
                         api_key=settings.STRIPE_SECRET_KEY,
                         payment_intent=payment_intent_id,
                         idempotency_key="late-payment-refund-" + str(order_id),
                     )
-                except stripe.StripeError:
-                    logger.error(
-                        "Stripe webhook: event=%s type=%s order=%s outcome=late payment refund failed",
-                        event_id,
-                        event_type,
-                        order_id,
-                    )
-                    raise HTTPException(status_code=500, detail="Refund failed, please retry")
+                    refund_id = refund.id
+                except stripe.StripeError as error:
+                    if error.code != "charge_already_refunded":
+                        logger.error(
+                            "Stripe webhook: event=%s type=%s order=%s outcome=late payment refund failed",
+                            event_id,
+                            event_type,
+                            order_id,
+                        )
+                        raise HTTPException(status_code=500, detail="Refund failed, please retry")
+                    # Stripe says the money is already back (for example the customer's cancel refunded it): success
+
+                # A small transaction: the payment is refunded and the refund id is saved
+                order_repository.mark_payment_refunded(db, payment.id, refund_id)
+                db.commit()
                 return {"received": True}
 
             # Already paid (a duplicate delivery), shipped or delivered: nothing to change

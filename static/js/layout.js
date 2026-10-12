@@ -124,6 +124,28 @@ async function showLayout() {
     userArea.append(ordersLink, addressesLink);
   }
 
+  // Sellers get links to their products and to the orders that contain their products
+  if (user.role === "seller") {
+    const myProductsLink = document.createElement("a");
+    myProductsLink.href = "/seller-products.html";
+    myProductsLink.textContent = "My Products";
+    const sellerOrdersLink = document.createElement("a");
+    sellerOrdersLink.href = "/seller-orders.html";
+    sellerOrdersLink.textContent = "Orders";
+    userArea.append(myProductsLink, sellerOrdersLink);
+  }
+
+  // Admins get links to all orders and to the users
+  if (user.role === "admin") {
+    const adminOrdersLink = document.createElement("a");
+    adminOrdersLink.href = "/admin-orders.html";
+    adminOrdersLink.textContent = "Orders";
+    const adminUsersLink = document.createElement("a");
+    adminUsersLink.href = "/admin-users.html";
+    adminUsersLink.textContent = "Users";
+    userArea.append(adminOrdersLink, adminUsersLink);
+  }
+
   userArea.append(greeting, logoutButton);
 
   // Fill the badge with the number of items in the cart. If this fails, show no badge and no error.

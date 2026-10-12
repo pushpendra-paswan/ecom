@@ -93,7 +93,7 @@ Never commit secrets. Keep `.env` in `.gitignore` and maintain `.env.example`.
 - Tables: `users`, `addresses`, `categories`, `products`, `carts`, `cart_items`, `orders`, `order_items`, `payments`
 - Store money as integers in the smallest currency unit (paise or cents), never floats. This matches what Stripe expects.
 - `order_items` stores a **price snapshot**, so later price changes never rewrite order history.
-- `payments` stores: `order_id`, `stripe_checkout_session_id` (unique), `stripe_payment_intent_id`, `amount`, `currency` and `status` (`pending`, `succeeded`, `failed`).
+- `payments` stores: `order_id`, `stripe_checkout_session_id` (unique), `stripe_payment_intent_id`, `stripe_refund_id`, `amount`, `currency` and `status` (`pending`, `succeeded`, `failed`, `refunded`).
 - Let the database enforce correctness: foreign keys, unique constraints (one cart per user), `CHECK (stock >= 0)`.
 - Every schema change goes through an Alembic migration. Never edit the schema by hand.
 - Add indexes for category, price and the search column.
@@ -145,6 +145,7 @@ Two buyers must never be able to buy the last item.
 - A `pending_payment` order can be cancelled, which restores stock.
 - A `paid` order can be cancelled before it ships. This restores stock and creates a Stripe refund.
 - All cancellations run inside a transaction.
+- Sellers can move an order to shipped or delivered only when every item in it is theirs; otherwise only an admin can.
 
 ## Frontend conventions
 

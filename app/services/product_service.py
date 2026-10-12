@@ -79,6 +79,15 @@ def list_seller_products(db: Session, current_user: User, page: int, page_size: 
     return {"items": products, "total": total, "page": page, "page_size": page_size}
 
 
+def get_seller_product(db: Session, current_user: User, product_id: int):
+    # The seller's own product, active or not. Someone else's product looks like "not found".
+    product = product_repository.get_product_by_id(db, product_id)
+    if product is None or product.seller_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    return product
+
+
 def create_product(db: Session, current_user: User, request: CreateProductRequest):
     # The category must exist
     category = category_repository.get_category_by_id(db, request.category_id)
@@ -102,14 +111,20 @@ def update_product(db: Session, current_user: User, product_id: int, request: Up
     if current_user.role not in ("seller", "admin"):
         raise HTTPException(status_code=403, detail="Seller or admin access required")
 
-    # Find the product
-    product = product_repository.get_product_by_id(db, product_id)
-    if product is None:
+    # Lock the product row first, so this edit cannot interleave with a checkout that is
+    # reserving the same stock. Anyone else who changes this product waits until we commit.
+    locked_products = product_repository.lock_products(db, [product_id])
+    if len(locked_products) == 0:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Product not found")
 
     # A seller may only change their own products. Someone else's product looks like "not found".
-    if current_user.role == "seller" and product.seller_id != current_user.id:
+    if current_user.role == "seller" and locked_products[0].seller_id != current_user.id:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Product not found")
+
+    # Read the product again with its category and seller (the locked values stay as they are)
+    product = product_repository.get_product_by_id(db, product_id)
 
     # Use only the fields that were sent (seller_id is not part of the request at all)
     changes = request.model_dump(exclude_unset=True)
@@ -118,6 +133,7 @@ def update_product(db: Session, current_user: User, product_id: int, request: Up
     if "category_id" in changes:
         category = category_repository.get_category_by_id(db, changes["category_id"])
         if category is None:
+            db.rollback()
             raise HTTPException(status_code=400, detail="Category does not exist")
         product.category = category
         del changes["category_id"]
@@ -135,13 +151,16 @@ def deactivate_product(db: Session, current_user: User, product_id: int):
     if current_user.role not in ("seller", "admin"):
         raise HTTPException(status_code=403, detail="Seller or admin access required")
 
-    # Find the product
-    product = product_repository.get_product_by_id(db, product_id)
-    if product is None:
+    # Lock the product row first (same reason as in update_product)
+    locked_products = product_repository.lock_products(db, [product_id])
+    if len(locked_products) == 0:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Product not found")
+    product = locked_products[0]
 
     # A seller may only change their own products. Someone else's product looks like "not found".
     if current_user.role == "seller" and product.seller_id != current_user.id:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Product not found")
 
     # Soft delete: the row stays, it is only hidden (already inactive is fine)

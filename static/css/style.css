@@ -951,6 +951,157 @@ button:disabled {
   color: var(--color-muted);
 }
 
+/* ===== Order actions and payment badges (M9) ===== */
+.badge-payment-pending {
+  background: #fff4e5;
+  border-color: #f5c27a;
+  color: var(--color-stock-low);
+}
+
+.badge-payment-succeeded {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: var(--color-stock-in);
+}
+
+.badge-payment-failed {
+  background: var(--color-error-background);
+  border-color: #f1a9a0;
+  color: var(--color-stock-out);
+}
+
+.badge-payment-refunded {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #0d47a1;
+}
+
+/* Buttons and messages under an order (cancel, mark as shipped, retry refund) */
+.order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-small);
+  margin-bottom: var(--space-medium);
+}
+
+.order-actions .error-message {
+  flex-basis: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.order-actions .error-message[hidden] {
+  display: none;
+}
+
+.order-actions p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ===== Seller and admin dashboards (M9) ===== */
+.dashboard-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-small) var(--space-medium);
+}
+
+.dashboard-header h1 {
+  margin: 0;
+}
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-table th {
+  background: var(--color-surface);
+  white-space: nowrap;
+}
+
+.dashboard-image {
+  display: block;
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-small);
+}
+
+.dashboard-actions .button,
+.dashboard-actions button {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+/* The status filter on the admin orders page */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-small);
+  margin-bottom: var(--space-medium);
+}
+
+.filter-bar select {
+  padding: 0.4rem;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+/* The product form (create and edit) */
+.product-form {
+  max-width: 36rem;
+}
+
+.product-form label {
+  display: block;
+  margin-top: var(--space-medium);
+  margin-bottom: 0.25rem;
+  font-weight: bold;
+}
+
+.product-form input[type="text"],
+.product-form select,
+.product-form textarea {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.product-form .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+  font-weight: normal;
+}
+
+.product-form .error-message[hidden] {
+  display: none;
+}
+
 /* ===== States (loading, error, empty) ===== */
 .state-loading,
 .state-empty,
@@ -1027,5 +1178,26 @@ button:disabled {
   .order-table td {
     padding: 0.4rem 0.25rem;
     font-size: 0.9rem;
+  }
+
+  /* Dashboards: the table keeps a readable width and scrolls inside its own box,
+     the page itself never scrolls sideways */
+  .dashboard-table {
+    min-width: 36rem;
+  }
+
+  .dashboard-table th,
+  .dashboard-table td {
+    padding: 0.4rem 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .dashboard-header .button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .product-form {
+    max-width: none;
   }
 }

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>All orders</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-requires-login="true">
+  <header id="site-header"></header>
+
+  <main class="container">
+    <h1>All orders</h1>
+
+    <!-- The status filter: a plain GET form that comes back to this page -->
+    <form class="filter-bar" method="get" action="/admin-orders.html">
+      <label for="status-filter">Status</label>
+      <select id="status-filter" name="status">
+        <option value="">All</option>
+        <option value="pending_payment">Awaiting payment</option>
+        <option value="paid">Paid</option>
+        <option value="shipped">Shipped</option>
+        <option value="delivered">Delivered</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <button type="submit">Filter</button>
+    </form>
+
+    <!-- The orders and the page links (filled by admin-orders.js) -->
+    <div id="orders-area"><p class="state-loading">Loading...</p></div>
+    <div id="pagination-area"></div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/admin-orders.js"></script>
+</body>
+</html>

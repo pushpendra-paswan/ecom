@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Products</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-requires-login="true">
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="dashboard-header">
+      <h1>My Products</h1>
+      <a class="button" href="/seller-product-form.html">Add product</a>
+    </div>
+
+    <!-- A message after an action fails (filled by seller-products.js) -->
+    <p id="action-message" class="error-message" hidden></p>
+
+    <!-- The products and the page links (filled by seller-products.js) -->
+    <div id="products-area"><p class="state-loading">Loading...</p></div>
+    <div id="pagination-area"></div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/seller-products.js"></script>
+</body>
+</html>
