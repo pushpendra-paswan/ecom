@@ -6,6 +6,9 @@ from sqlalchemy import create_engine, pool
 from app.core.config import settings
 from app.db import Base
 
+# Importing the models registers every table on Base.metadata
+import app.models  # noqa: F401
+
 # Alembic Config object (gives access to alembic.ini)
 config = context.config
 
@@ -14,11 +17,11 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # The models' metadata, used by "alembic revision --autogenerate".
-# From M1 on, import every model module here so its tables are registered on Base.
 target_metadata = Base.metadata
 
-# The database URL comes from the Settings class, not from alembic.ini
-database_url = settings.DATABASE_URL
+# The database URL comes from the Settings class, unless the caller set one
+# (the tests set it to point Alembic at the test database)
+database_url = config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
 
 
 def run_migrations_offline() -> None:

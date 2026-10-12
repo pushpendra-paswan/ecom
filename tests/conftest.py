@@ -1,9 +1,11 @@
 import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.db import get_db
@@ -37,10 +39,39 @@ def test_engine():
         admin_connection.execute(f'CREATE DATABASE "{test_url.database}"')
     admin_connection.close()
 
+    # Point Alembic at the test database
+    alembic_config = Config("alembic.ini")
+    alembic_config.set_main_option("sqlalchemy.url", settings.TEST_DATABASE_URL)
+
+    # Build the schema with the real migration, starting from an empty database
+    command.downgrade(alembic_config, "base")
+    command.upgrade(alembic_config, "head")
+
     # Create an engine that points at the test database
     engine = create_engine(settings.TEST_DATABASE_URL)
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def db_session(test_engine):
+    # Start a transaction that the test can never commit for real
+    connection = test_engine.connect()
+    outer_transaction = connection.begin()
+
+    # The session joins that transaction (a failed statement only rolls back to a savepoint)
+    session = Session(
+        bind=connection,
+        autoflush=False,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    yield session
+
+    # Throw away everything the test wrote
+    session.close()
+    outer_transaction.rollback()
+    connection.close()
 
 
 @pytest.fixture
